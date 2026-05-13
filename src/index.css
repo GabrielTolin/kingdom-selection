@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap');
+@import "tailwindcss";
+
+:root {
+  --color-primary: #F97316;
+  --color-primary-dark: #EA580C;
+  --color-bg: #0F0F0F;
+  --color-surface: #1A1A1A;
+  --color-surface-2: #242424;
+  --color-border: #2E2E2E;
+  --color-text: #F5F5F5;
+  --color-text-muted: #888;
+  --color-success: #22C55E;
+  --color-danger: #EF4444;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  min-height: 100vh;
+  width: 100%;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  justify-content: center;
+}
+
+/* Imagem de fundo — cobre o ecrã todo sem cortes */
+html::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: var(--bg-logo);
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.06;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+#root {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 1;
+}
+
+h1, h2, h3, h4 { font-family: 'Syne', sans-serif; }
