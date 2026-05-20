@@ -30,20 +30,6 @@ body {
   justify-content: center;
 }
 
-/* Imagem de fundo — cobre o ecrã todo sem cortes */
-html::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: var(--bg-logo);
-  background-size: contain;
-  background-position: center;
-  background-repeat: no-repeat;
-  opacity: 0.06;
-  pointer-events: none;
-  z-index: 1000;
-}
-
 #root {
   width: 100%;
   max-width: 480px;
@@ -51,6 +37,7 @@ html::before {
   flex-direction: column;
   position: relative;
   z-index: 1;
+  background: transparent;
 }
 
 h1, h2, h3, h4 { font-family: 'Syne', sans-serif; }

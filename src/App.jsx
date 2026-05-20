@@ -10,15 +10,15 @@ import logoKS from './assets/logo-ks.png'
 function App() {
   return (
     <AuthProvider>
-      {/* Fundo com logo em todas as páginas */}
+      {/* Fundo adaptado para mobile e desktop */}
       <div style={{
         position: 'fixed',
         inset: 0,
         backgroundImage: `url(${logoKS})`,
-        backgroundSize: 'contain',
-        backgroundPosition: 'center',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center center',
         backgroundRepeat: 'no-repeat',
-        opacity: 0.15,
+        opacity: 0.1,
         zIndex: 0,
         pointerEvents: 'none',
         mixBlendMode: 'screen',
@@ -28,15 +28,9 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/login" />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/ponto" element={
-            <RotaProtegida><PontoFuncionario /></RotaProtegida>
-          } />
-          <Route path="/recibos" element={
-            <RotaProtegida><Recibos /></RotaProtegida>
-          } />
-          <Route path="/admin" element={
-            <RotaProtegida apenasAdmin><DashboardAdmin /></RotaProtegida>
-          } />
+          <Route path="/ponto" element={<RotaProtegida><PontoFuncionario /></RotaProtegida>} />
+          <Route path="/recibos" element={<RotaProtegida><Recibos /></RotaProtegida>} />
+          <Route path="/admin" element={<RotaProtegida apenasAdmin><DashboardAdmin /></RotaProtegida>} />
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
       </div>
