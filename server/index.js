@@ -13,7 +13,12 @@ const app = express()
 const PORT = process.env.PORT || 3001
 
 // Middlewares
-app.use(cors({ origin: 'http://localhost:5173' }))  // permite chamadas do React
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'https://kingdom-selection.vercel.app'
+  ]
+}))
 app.use(express.json())
 
 // Rotas
