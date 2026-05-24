@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseKey = import.meta.env.VITE_SUPABASE_KEY
+const supabaseUrl = 'https://wbzfvipcslqczxqivkjn.supabase.co'
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndiemZ2aXBjc2xxY3p4cWl2a2puIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODIzMzksImV4cCI6MjA5MzA1ODMzOX0.JEgLRZxr1GVlfa03bFf40o6bedfCe7q8AGE8njIanCk'
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
