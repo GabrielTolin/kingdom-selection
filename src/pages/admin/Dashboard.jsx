@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, Clock, CheckCircle, XCircle, Building2, ChevronRight, ArrowLeft, Phone, Mail, Euro, Calendar, Briefcase, FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Pencil, Save, X, AlertCircle, Plus, UserPlus, UserMinus, BarChart2, Send } from 'lucide-react'
+import { Users, Clock, CheckCircle, XCircle, Building2, ChevronRight, ArrowLeft, Phone, Mail, Euro, Calendar, Briefcase, FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Pencil, Save, X, AlertCircle, Plus, UserPlus, UserMinus, BarChart2, Send, MapPin } from 'lucide-react'
 import { obrasAPI, funcionariosAPI, pontoAPI, recibosAPI, obraFuncionariosAPI } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../context/AuthContext'
@@ -549,9 +549,20 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
               <span className="w-2 h-2 rounded-full" style={{ background: tipo === 'entrada' ? 'var(--color-success)' : 'var(--color-danger)' }} />
               <span className="text-sm capitalize">{tipo}</span>
             </div>
-            <span className="text-sm font-medium">
-              {registo ? new Date(registo.hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }) : '—'}
-            </span>
+            <div className="flex items-center gap-2">
+              {registo?.latitude && registo?.longitude && (
+                <a
+                  href={`https://www.google.com/maps?q=${registo.latitude},${registo.longitude}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium"
+                  style={{ background: '#1F1208', color: 'var(--color-primary)', border: '1px solid #F9731633' }}>
+                  <MapPin size={11} /> Ver local
+                </a>
+              )}
+              <span className="text-sm font-medium">
+                {registo ? new Date(registo.hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }) : '—'}
+              </span>
+            </div>
           </div>
         ))}
       </div>

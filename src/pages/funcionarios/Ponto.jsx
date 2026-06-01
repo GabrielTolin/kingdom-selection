@@ -229,7 +229,8 @@ export default function PontoFuncionario() {
                 {r.latitude && <MapPin size={11} style={{ color: 'var(--color-text-muted)' }} />}
               </div>
               <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                {new Date(r.hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
+                {new Date(r.hora.endsWith('Z') || r.hora.includes('+') ? r.hora : r.hora + 'Z')
+                .toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon' })}
               </span>
             </div>
           ))}
