@@ -560,7 +560,8 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
                 </a>
               )}
               <span className="text-sm font-medium">
-                {registo ? new Date(registo.hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                {new Date(registo.hora.endsWith('Z') || registo.hora.includes('+') ? registo.hora : registo.hora + 'Z')
+                .toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon' })}
               </span>
             </div>
           </div>
