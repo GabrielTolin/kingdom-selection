@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, Clock, CheckCircle, XCircle, Building2, ChevronRight, ArrowLeft, Phone, Mail, Euro, Calendar, Briefcase, FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Pencil, Save, X, AlertCircle, Plus, UserPlus, UserMinus, BarChart2, Send, MapPin, Crosshair, Archive } from 'lucide-react'
+import { Users, Clock, CheckCircle, XCircle, Building2, ChevronRight, ChevronLeft, ArrowLeft, Phone, Mail, Euro, Calendar, Briefcase, FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Pencil, Save, X, AlertCircle, Plus, UserPlus, UserMinus, BarChart2, Send, MapPin, Crosshair, Archive } from 'lucide-react'
 import { obrasAPI, funcionariosAPI, pontoAPI, recibosAPI, obraFuncionariosAPI } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../context/AuthContext'
 import { obterLocalizacao, RAIO_MAXIMO } from '../../utils/gps'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 function BadgeEstado({ estado }) {
   const config = {
@@ -912,6 +914,174 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
   )
 }
 
+// Calcula o intervalo de um período de folha de ponto (dia 23 → dia 22).
+// offset 0 = último período FECHADO; +1 = período em curso; -1 = período anterior, etc.
+function periodoInfo(offset = 0, hoje = new Date()) {
+  let mes = hoje.getMonth()
+  if (hoje.getDate() >= 23) mes += 1        // o período aberto termina no dia 22 do mês seguinte
+  mes = mes - 1 + offset                     // recua 1 para o último fechado, depois aplica offset
+  const fim    = new Date(hoje.getFullYear(), mes, 22, 23, 59, 59, 999)
+  const inicio = new Date(hoje.getFullYear(), mes - 1, 23, 0, 0, 0, 0)
+  return { inicio, fim }
+}
+
+const fmtDia = d => d.toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' })
+
+function RelatorioMensal({ funcionariosTodos }) {
+  const [offset, setOffset] = useState(0)
+  const [linhas, setLinhas] = useState([])
+  const [gerando, setGerando] = useState(false)
+  const [erro, setErro] = useState(null)
+
+  const { inicio, fim } = periodoInfo(offset)
+  const emCurso = offset >= 1
+  const periodoLabel = `${fmtDia(inicio)} — ${fmtDia(fim)}`
+
+  useEffect(() => { gerar() }, [offset, funcionariosTodos])
+
+  const gerar = async () => {
+    if (!funcionariosTodos.length) { setLinhas([]); return }
+    try {
+      setGerando(true); setErro(null)
+      const [{ data: registos, error }, { data: obrasAll }] = await Promise.all([
+        supabase.from('registos_ponto').select('*')
+          .gte('hora', inicio.toISOString()).lte('hora', fim.toISOString()).order('hora'),
+        supabase.from('obras').select('id, nome'),
+      ])
+      if (error) throw error
+      const obraNome = Object.fromEntries((obrasAll || []).map(o => [o.id, o.nome]))
+      const dados = funcionariosTodos.map(f => {
+        const regs = (registos || [])
+          .filter(r => r.funcionario_id === f.id)
+          .sort((a, b) => new Date(a.hora) - new Date(b.hora))
+        let ms = 0
+        for (let i = 0; i < regs.length - 1; i += 2) {
+          if (regs[i].tipo === 'entrada' && regs[i + 1]?.tipo === 'saida') {
+            ms += new Date(regs[i + 1].hora) - new Date(regs[i].hora)
+          }
+        }
+        const horas = ms / 1000 / 3600
+        const dias  = new Set(regs.map(r => r.hora.split('T')[0])).size
+        const obras = [...new Set(regs.map(r => r.obra_id).filter(Boolean))]
+          .map(id => obraNome[id] || '—').join(', ') || '—'
+        return { nome: f.nome, horas, dias, obras }
+      }).sort((a, b) => b.horas - a.horas)
+      setLinhas(dados)
+    } catch { setErro('Erro ao gerar relatório. Verifica a ligação.') }
+    finally { setGerando(false) }
+  }
+
+  const descarregar = () => {
+    const doc = new jsPDF()
+    doc.setFontSize(16)
+    doc.setTextColor(20)
+    doc.text('Kingdom Selection — Relatório mensal', 14, 18)
+    doc.setFontSize(11)
+    doc.setTextColor(120)
+    doc.text(`Período: ${periodoLabel}`, 14, 26)
+    doc.text(`Gerado em ${new Date().toLocaleDateString('pt-PT')}`, 14, 32)
+
+    autoTable(doc, {
+      startY: 40,
+      head: [['Nome', 'Horas trabalhadas', 'Dias trabalhados', 'Obra']],
+      body: linhas.map(l => [l.nome, `${l.horas.toFixed(1)}h`, String(l.dias), l.obras]),
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [255, 122, 26], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+      columnStyles: { 1: { halign: 'center' }, 2: { halign: 'center' } },
+    })
+
+    const finalY = doc.lastAutoTable?.finalY || 40
+    doc.setFontSize(10)
+    doc.setTextColor(20)
+    doc.text(
+      `Total: ${totalHoras.toFixed(1)}h  ·  ${comRegisto.length} funcionários com registo`,
+      14, finalY + 10
+    )
+
+    doc.save(`relatorio_${inicio.toISOString().slice(0, 10)}_a_${fim.toISOString().slice(0, 10)}.pdf`)
+  }
+
+  const comRegisto  = linhas.filter(l => l.dias > 0)
+  const totalHoras  = linhas.reduce((s, l) => s + l.horas, 0)
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Navegação de período */}
+      <div className="flex items-center justify-between p-3 rounded-2xl"
+        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <button onClick={() => setOffset(o => o - 1)}
+          className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: 'var(--color-surface-2)' }}>
+          <ChevronLeft size={18} />
+        </button>
+        <div className="text-center">
+          <p className="text-sm font-bold flex items-center justify-center gap-1.5">
+            <Calendar size={13} color="var(--color-primary)" /> {periodoLabel}
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: emCurso ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>
+            {emCurso ? 'Período em curso (ainda aberto)' : 'Período fechado'}
+          </p>
+        </div>
+        <button onClick={() => setOffset(o => Math.min(o + 1, 1))} disabled={offset >= 1}
+          className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-30"
+          style={{ background: 'var(--color-surface-2)' }}>
+          <ChevronRight size={18} />
+        </button>
+      </div>
+
+      {/* Resumo + descarregar */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="p-4 rounded-2xl text-center" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <p className="text-2xl font-bold" style={{ color: 'var(--color-primary)' }}>{comRegisto.length}</p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>funcionários com registo</p>
+        </div>
+        <div className="p-4 rounded-2xl text-center" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <p className="text-2xl font-bold">{totalHoras.toFixed(1)}h</p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>total de horas</p>
+        </div>
+      </div>
+
+      <button onClick={descarregar} disabled={gerando || linhas.length === 0}
+        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-semibold transition-all hover:opacity-90 active:scale-95 disabled:opacity-50"
+        style={{ background: 'var(--color-primary)', color: 'white', boxShadow: '0 4px 20px var(--color-primary-glow)' }}>
+        <Download size={18} /> Descarregar relatório (PDF)
+      </button>
+
+      {erro && (
+        <div className="flex items-center gap-2 p-3 rounded-xl text-sm" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
+          <AlertCircle size={14} /> {erro}
+        </div>
+      )}
+
+      {/* Pré-visualização */}
+      {gerando ? (
+        <p className="text-sm text-center py-8 rounded-2xl" style={{ color: 'var(--color-text-muted)', background: 'var(--color-surface)' }}>A gerar relatório...</p>
+      ) : comRegisto.length === 0 ? (
+        <div className="flex flex-col items-center py-10 rounded-2xl gap-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <FileText size={28} style={{ color: 'var(--color-text-muted)' }} />
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Sem registos neste período</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {comRegisto.map((l, i) => (
+            <div key={i} className="px-4 py-3 rounded-2xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-semibold text-sm">{l.nome}</p>
+                <span className="text-sm font-bold" style={{ color: 'var(--color-primary)' }}>{l.horas.toFixed(1)}h</span>
+              </div>
+              <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <span className="flex items-center gap-1"><Clock size={11} /> {l.dias} {l.dias === 1 ? 'dia' : 'dias'}</span>
+                <span className="flex items-center gap-1 truncate"><Building2 size={11} /> {l.obras}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DashboardAdmin() {
   const [vista, setVista] = useState('obras')
   const [aba, setAba] = useState('obras')
@@ -1034,16 +1204,19 @@ export default function DashboardAdmin() {
           <div className="flex gap-1 p-1 rounded-2xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             {[
               { id: 'obras', label: 'Obras', icon: <Building2 size={15} />, count: obras.length },
-              { id: 'funcionarios', label: 'Funcionários', icon: <Users size={15} />, count: funcionariosTodos.length },
+              { id: 'funcionarios', label: 'Equipa', icon: <Users size={15} />, count: funcionariosTodos.length },
+              { id: 'relatorios', label: 'Relatórios', icon: <FileText size={15} />, count: null },
             ].map(t => (
               <button key={t.id} onClick={() => setAba(t.id)}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all"
                 style={aba === t.id
                   ? { background: 'var(--color-primary)', color: 'white' }
                   : { background: 'transparent', color: 'var(--color-text-muted)' }}>
                 {t.icon} {t.label}
-                <span className="text-xs px-1.5 py-0.5 rounded-full"
-                  style={{ background: aba === t.id ? 'rgba(255,255,255,0.2)' : 'var(--color-surface-2)' }}>{t.count}</span>
+                {t.count !== null && (
+                  <span className="text-xs px-1.5 py-0.5 rounded-full"
+                    style={{ background: aba === t.id ? 'rgba(255,255,255,0.2)' : 'var(--color-surface-2)' }}>{t.count}</span>
+                )}
               </button>
             ))}
           </div>
@@ -1091,7 +1264,7 @@ export default function DashboardAdmin() {
               })}
             </div>
           )
-          ) : (
+          ) : aba === 'funcionarios' ? (
             /* ── Aba: lista de todos os funcionários ── */
             funcionariosTodos.length === 0 ? (
               <div className="flex flex-col items-center py-12 rounded-2xl gap-3"
@@ -1129,6 +1302,9 @@ export default function DashboardAdmin() {
                 ))}
               </div>
             )
+          ) : (
+            /* ── Aba: relatórios mensais ── */
+            <RelatorioMensal funcionariosTodos={funcionariosTodos} />
           )}
         </>
       )}
