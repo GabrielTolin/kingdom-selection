@@ -2,16 +2,35 @@
 @import "tailwindcss";
 
 :root {
-  --color-primary: #F97316;
+  /* ── Marca ─────────────────────────────────────────── */
+  --color-primary: #FF7A1A;          /* laranja vivo */
   --color-primary-dark: #EA580C;
-  --color-bg: #0F0F0F;
-  --color-surface: #1A1A1A;
-  --color-surface-2: #242424;
-  --color-border: #2E2E2E;
-  --color-text: #F5F5F5;
-  --color-text-muted: #888;
-  --color-success: #22C55E;
-  --color-danger: #EF4444;
+  --color-primary-bg: #2A1608;       /* fundo tintado laranja */
+  --color-primary-border: #FF7A1A55;
+  --color-primary-glow: rgba(255, 122, 26, 0.35);
+
+  /* ── Base (dark) ───────────────────────────────────── */
+  --color-bg: #0D0D0F;
+  --color-surface: #191919;
+  --color-surface-2: #262626;
+  --color-border: #333333;
+  --color-text: #F7F7F7;
+  --color-text-muted: #9AA0A6;       /* mais claro → melhor contraste */
+
+  /* ── Estados (cor viva + fundo tintado + borda) ────── */
+  --color-success: #2FE06A;          /* verde vibrante */
+  --color-success-bg: #0F3323;
+  --color-success-border: #2FE06A55;
+
+  --color-danger: #FF4D4D;           /* vermelho vibrante */
+  --color-danger-bg: #331616;
+  --color-danger-border: #FF4D4D55;
+
+  --color-info: #5FA8FF;             /* azul vibrante */
+  --color-info-bg: #152238;
+
+  --color-warning: #FBA94C;
+  --color-warning-bg: #2A1608;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { LogIn, LogOut, Clock, CheckCircle, FileText, AlertCircle, LogOut as LogOutIcon, MapPin, Loader } from 'lucide-react'
+import { LogIn, LogOut, Clock, CheckCircle, FileText, AlertCircle, LogOut as LogOutIcon, MapPin, Loader, Lock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { pontoAPI, funcionariosAPI, obrasAPI } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
-import { obterLocalizacao, estaDentroDoRaio } from '../../utils/gps'
+import { obterLocalizacao, estaDentroDoRaio, distanciaAObra, RAIO_MAXIMO } from '../../utils/gps'
+import AlterarPasswordModal from '../../components/AlterarPasswordModal'
 import logoKS from '../../assets/logo-ks.png'
 
 export default function PontoFuncionario() {
@@ -17,11 +18,31 @@ export default function PontoFuncionario() {
   const [erro, setErro] = useState(null)
   const [erroGPS, setErroGPS] = useState(null)
   const [obraAtual, setObraAtual] = useState(null)
+  const [modalPassword, setModalPassword] = useState(false)
+  const [distancia, setDistancia] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     if (perfil?.funcionario_id) carregarTudo()
   }, [perfil])
+
+  // Rastreia a distância à obra em tempo real (só se a obra tiver GPS definido)
+  useEffect(() => {
+    if (!obraAtual?.latitude || !navigator.geolocation) {
+      setDistancia(null)
+      return
+    }
+    const id = navigator.geolocation.watchPosition(
+      pos => setDistancia(distanciaAObra(
+        { latitude: pos.coords.latitude, longitude: pos.coords.longitude }, obraAtual)),
+      () => setDistancia(null),
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    )
+    return () => navigator.geolocation.clearWatch(id)
+  }, [obraAtual])
+
+  const raioObra = obraAtual?.raio_metros || RAIO_MAXIMO
+  const dentroRaio = distancia !== null && distancia <= raioObra
 
   const carregarTudo = async () => {
     try {
@@ -64,7 +85,9 @@ export default function PontoFuncionario() {
       }
       if (localizacaoAtual && obraAtual?.latitude) {
         if (!estaDentroDoRaio(localizacaoAtual, obraAtual)) {
-          setErroGPS(`Estás fora do raio permitido da obra (${obraAtual.raio_metros || 200}m). Aproxima-te do local de trabalho.`)
+          const dist = Math.round(distanciaAObra(localizacaoAtual, obraAtual))
+          const raio = obraAtual.raio_metros || RAIO_MAXIMO
+          setErroGPS(`Estás a ${dist}m da obra — o limite para bater o ponto é ${raio}m. Aproxima-te do local de trabalho.`)
           setRegistando(false)
           return
         }
@@ -85,13 +108,18 @@ export default function PontoFuncionario() {
   const primeiroNome = funcionario?.nome?.split(' ')[0] || ''
 
   return (
-        <div className="min-h-screen p-4 w-full max-w-sm mx-auto flex flex-col justify-start gap-6"    
+        <div className="min-h-screen p-4 w-full max-w-sm mx-auto flex flex-col justify-start gap-6"
         style={{ background: 'rgba(15, 15, 15, 0.15)'  }}>
+
+      {modalPassword && <AlterarPasswordModal onFechar={() => setModalPassword(false)} />}
 
       {/* Header */}
       <div className="flex items-center justify-between py-4 mb-4">
         <div className="flex items-center gap-3">
-          
+          <div className="w-10 h-10 rounded-2xl flex items-center justify-center overflow-hidden flex-shrink-0"
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <img src={logoKS} alt="Kingdom Selection" className="w-7 h-7 object-contain" />
+          </div>
           <div>
             {loading
               ? <div className="h-5 w-28 rounded-lg animate-pulse" style={{ background: 'var(--color-surface)' }} />
@@ -105,7 +133,7 @@ export default function PontoFuncionario() {
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
             style={{
-              background: dentroObra ? '#16352A' : '#2A1A1A',
+              background: dentroObra ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
               color: dentroObra ? 'var(--color-success)' : 'var(--color-danger)',
             }}>
             <span className="w-2 h-2 rounded-full"
@@ -137,16 +165,27 @@ export default function PontoFuncionario() {
         </div>
       )}
 
-      {/* Obra atual */}
+      {/* Obra atual + distância em tempo real */}
       {obraAtual && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-4"
           style={{ background: 'var(--color-surface-2)' }}>
           <MapPin size={13} color="var(--color-primary)" />
           <span className="text-xs font-medium">{obraAtual.nome}</span>
           {obraAtual.latitude && (
-            <span className="text-xs ml-auto" style={{ color: 'var(--color-text-muted)' }}>
-              📍 GPS ativo
-            </span>
+            distancia === null ? (
+              <span className="flex items-center gap-1 text-xs ml-auto" style={{ color: 'var(--color-text-muted)' }}>
+                <Loader size={11} className="animate-spin" /> A localizar...
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-xs font-semibold ml-auto px-2 py-0.5 rounded-full"
+                style={{
+                  background: dentroRaio ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+                  color: dentroRaio ? 'var(--color-success)' : 'var(--color-danger)',
+                }}>
+                {dentroRaio ? <CheckCircle size={11} /> : <AlertCircle size={11} />}
+                ≈{Math.round(distancia)}m
+              </span>
+            )
           )}
         </div>
       )}
@@ -154,21 +193,21 @@ export default function PontoFuncionario() {
       {/* Erros */}
       {erroGPS && (
         <div className="flex items-start gap-3 p-4 rounded-2xl mb-4"
-          style={{ background: '#2A1208', border: '1px solid #F9731633' }}>
+          style={{ background: 'var(--color-primary-bg)', border: '1px solid var(--color-primary-border)' }}>
           <MapPin size={18} color="var(--color-primary)" style={{ flexShrink: 0, marginTop: 2 }} />
           <span className="text-sm">{erroGPS}</span>
         </div>
       )}
       {erro && (
         <div className="flex items-center gap-3 p-4 rounded-2xl mb-4"
-          style={{ background: '#2A1A1A', border: '1px solid #EF444433' }}>
+          style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-border)' }}>
           <AlertCircle size={18} color="var(--color-danger)" />
           <span className="text-sm">{erro}</span>
         </div>
       )}
       {feedback && (
         <div className="flex items-center gap-3 p-4 rounded-2xl mb-4"
-          style={{ background: feedback === 'entrada' ? '#16352A' : '#2A1A1A' }}>
+          style={{ background: feedback === 'entrada' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)' }}>
           <CheckCircle size={20} color={feedback === 'entrada' ? 'var(--color-success)' : 'var(--color-danger)'} />
           <span className="font-medium text-sm">
             {feedback === 'entrada' ? 'Entrada registada!' : 'Saída registada!'}
@@ -180,13 +219,13 @@ export default function PontoFuncionario() {
       <div className="grid grid-cols-2 gap-4 mb-4">
         <button onClick={() => marcarPonto('entrada')} disabled={dentroObra || loading || registando}
           className="flex flex-col items-center gap-3 p-6 rounded-2xl transition-all active:scale-95 disabled:opacity-30"
-          style={{ background: '#16352A', border: '1px solid #22C55E33' }}>
+          style={{ background: 'var(--color-success-bg)', border: '1px solid var(--color-success-border)' }}>
           {registando ? <Loader size={28} color="var(--color-success)" /> : <LogIn size={28} color="var(--color-success)" />}
           <span className="font-bold text-sm" style={{ color: 'var(--color-success)' }}>ENTRADA</span>
         </button>
         <button onClick={() => marcarPonto('saida')} disabled={!dentroObra || loading || registando}
           className="flex flex-col items-center gap-3 p-6 rounded-2xl transition-all active:scale-95 disabled:opacity-30"
-          style={{ background: '#2A1A1A', border: '1px solid #EF444433' }}>
+          style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-border)' }}>
           {registando ? <Loader size={28} color="var(--color-danger)" /> : <LogOut size={28} color="var(--color-danger)" />}
           <span className="font-bold text-sm" style={{ color: 'var(--color-danger)' }}>SAÍDA</span>
         </button>
@@ -197,12 +236,27 @@ export default function PontoFuncionario() {
         className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl mb-6 transition-all hover:opacity-80"
         style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#16352A' }}>
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--color-success-bg)' }}>
             <FileText size={15} color="var(--color-success)" />
           </div>
           <div className="text-left">
             <p className="text-sm font-semibold">Os meus recibos</p>
             <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Ver e descarregar vencimentos</p>
+          </div>
+        </div>
+      </button>
+
+      {/* Botão alterar password */}
+      <button onClick={() => setModalPassword(true)}
+        className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl mb-6 transition-all hover:opacity-80"
+        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--color-surface-2)' }}>
+            <Lock size={15} color="var(--color-primary)" />
+          </div>
+          <div className="text-left">
+            <p className="text-sm font-semibold">Alterar password</p>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Definir uma nova password de acesso</p>
           </div>
         </div>
       </button>

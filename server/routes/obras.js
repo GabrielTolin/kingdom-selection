@@ -27,11 +27,17 @@ router.get('/:id', async (req, res) => {
 
 
 router.post('/', async (req, res) => {
-  const { nome, local } = req.body
+  const { nome, local, latitude, longitude, raio_metros } = req.body
   if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' })
   const { data, error } = await supabase
     .from('obras')
-    .insert([{ nome, local }])
+    .insert([{
+      nome,
+      local,
+      latitude: latitude || null,
+      longitude: longitude || null,
+      raio_metros: raio_metros || 200,
+    }])
     .select()
     .single()
   if (error) return res.status(500).json({ error: error.message })
@@ -40,15 +46,29 @@ router.post('/', async (req, res) => {
 
 
 router.put('/:id', async (req, res) => {
-  const { nome, local, ativa } = req.body
+  // Atualiza apenas os campos enviados (evita apagar dados por engano)
+  const campos = {}
+  for (const chave of ['nome', 'local', 'ativa', 'latitude', 'longitude', 'raio_metros']) {
+    if (req.body[chave] !== undefined) campos[chave] = req.body[chave]
+  }
   const { data, error } = await supabase
     .from('obras')
-    .update({ nome, local, ativa })
+    .update(campos)
     .eq('id', req.params.id)
     .select()
     .single()
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
+})
+
+// DELETE /api/obras/:id — arquivar obra (mantém o histórico de pontos)
+router.delete('/:id', async (req, res) => {
+  const { error } = await supabase
+    .from('obras')
+    .update({ ativa: false })
+    .eq('id', req.params.id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ message: 'Obra arquivada com sucesso' })
 })
 
 // Associa um funcionario a obra

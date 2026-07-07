@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, Clock, CheckCircle, XCircle, Building2, ChevronRight, ArrowLeft, Phone, Mail, Euro, Calendar, Briefcase, FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Pencil, Save, X, AlertCircle, Plus, UserPlus, UserMinus, BarChart2, Send, MapPin } from 'lucide-react'
+import { Users, Clock, CheckCircle, XCircle, Building2, ChevronRight, ArrowLeft, Phone, Mail, Euro, Calendar, Briefcase, FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Pencil, Save, X, AlertCircle, Plus, UserPlus, UserMinus, BarChart2, Send, MapPin, Crosshair, Archive } from 'lucide-react'
 import { obrasAPI, funcionariosAPI, pontoAPI, recibosAPI, obraFuncionariosAPI } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../context/AuthContext'
+import { obterLocalizacao, RAIO_MAXIMO } from '../../utils/gps'
 
 function BadgeEstado({ estado }) {
   const config = {
-    presente: { bg: '#16352A', color: 'var(--color-success)', icon: <CheckCircle size={12} />, label: 'Presente' },
-    saiu:     { bg: '#1A1A2E', color: '#60A5FA',              icon: <Clock size={12} />,        label: 'Saiu' },
-    ausente:  { bg: '#2A1A1A', color: 'var(--color-danger)',  icon: <XCircle size={12} />,      label: 'Ausente' },
+    presente: { bg: 'var(--color-success-bg)', color: 'var(--color-success)', icon: <CheckCircle size={12} />, label: 'Presente' },
+    saiu:     { bg: 'var(--color-info-bg)', color: 'var(--color-info)',              icon: <Clock size={12} />,        label: 'Saiu' },
+    ausente:  { bg: 'var(--color-danger-bg)', color: 'var(--color-danger)',  icon: <XCircle size={12} />,      label: 'Ausente' },
   }
   const c = config[estado] || config.ausente
   return (
@@ -83,8 +84,61 @@ function CampoInput({ label, icon, ...props }) {
   )
 }
 
+// Campos de localização GPS reutilizados na criação e edição de obras
+function CamposLocalizacao({ form, setForm }) {
+  const [obtendo, setObtendo] = useState(false)
+  const [erroGps, setErroGps] = useState(null)
+  const [precisao, setPrecisao] = useState(null)
+
+  const usarAtual = async () => {
+    try {
+      setObtendo(true); setErroGps(null); setPrecisao(null)
+      const loc = await obterLocalizacao()
+      setForm(p => ({ ...p, latitude: loc.latitude.toFixed(6), longitude: loc.longitude.toFixed(6) }))
+      setPrecisao(Math.round(loc.precisao))
+    } catch (e) { setErroGps(e.message) }
+    finally { setObtendo(false) }
+  }
+
+  const temLocalizacao = form.latitude && form.longitude
+
+  return (
+    <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-medium flex items-center gap-1.5" style={{ color: 'var(--color-text-muted)' }}>
+          <MapPin size={12} /> Localização GPS (raio {RAIO_MAXIMO}m)
+        </span>
+        <button type="button" onClick={usarAtual} disabled={obtendo}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50"
+          style={{ background: 'var(--color-primary)', color: 'white' }}>
+          <Crosshair size={12} /> {obtendo ? 'A obter...' : 'Usar localização atual'}
+        </button>
+      </div>
+      {erroGps && <p className="text-xs mb-2" style={{ color: 'var(--color-danger)' }}>{erroGps}</p>}
+      {precisao !== null && !erroGps && (
+        <p className="text-xs mb-2" style={{ color: 'var(--color-success)' }}>✓ Localização obtida (precisão ~{precisao}m)</p>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <input placeholder="Latitude" value={form.latitude || ''}
+          onChange={e => setForm(p => ({ ...p, latitude: e.target.value }))}
+          className="w-full px-3 py-2 rounded-lg text-xs outline-none"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+        <input placeholder="Longitude" value={form.longitude || ''}
+          onChange={e => setForm(p => ({ ...p, longitude: e.target.value }))}
+          className="w-full px-3 py-2 rounded-lg text-xs outline-none"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+      </div>
+      <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>
+        {temLocalizacao
+          ? 'Só é possível bater o ponto a menos de 200m deste local.'
+          : 'Sem GPS definido, o ponto pode ser batido em qualquer lugar.'}
+      </p>
+    </div>
+  )
+}
+
 function ModalNovaObra({ onFechar, onCriada }) {
-  const [form, setForm] = useState({ nome: '', local: '' })
+  const [form, setForm] = useState({ nome: '', local: '', latitude: '', longitude: '' })
   const [guardando, setGuardando] = useState(false)
   const [erro, setErro] = useState(null)
 
@@ -93,7 +147,13 @@ function ModalNovaObra({ onFechar, onCriada }) {
     try {
       setGuardando(true)
       setErro(null)
-      await obrasAPI.criar({ nome: form.nome, local: form.local })
+      await obrasAPI.criar({
+        nome: form.nome,
+        local: form.local,
+        latitude: form.latitude ? parseFloat(form.latitude) : null,
+        longitude: form.longitude ? parseFloat(form.longitude) : null,
+        raio_metros: RAIO_MAXIMO,
+      })
       onCriada()
       onFechar()
     } catch { setErro('Erro ao criar obra. Tenta novamente.') }
@@ -104,7 +164,7 @@ function ModalNovaObra({ onFechar, onCriada }) {
     <Modal titulo="Nova obra" onFechar={onFechar} onGuardar={guardar} guardando={guardando}>
       {erro && (
         <div className="flex items-center gap-2 p-3 rounded-xl mb-4 text-sm"
-          style={{ background: '#2A1A1A', color: 'var(--color-danger)' }}>
+          style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
           <AlertCircle size={14} /> {erro}
         </div>
       )}
@@ -115,7 +175,45 @@ function ModalNovaObra({ onFechar, onCriada }) {
         <CampoInput label="Local" icon={<Briefcase size={12} />}
           placeholder="ex: Porto"
           value={form.local} onChange={e => setForm(p => ({ ...p, local: e.target.value }))} />
+        <CamposLocalizacao form={form} setForm={setForm} />
       </div>
+    </Modal>
+  )
+}
+
+// Modal para definir/atualizar a localização GPS de uma obra existente
+function ModalLocalizacaoObra({ obra, onFechar, onGuardada }) {
+  const [form, setForm] = useState({
+    latitude: obra.latitude || '',
+    longitude: obra.longitude || '',
+  })
+  const [guardando, setGuardando] = useState(false)
+  const [erro, setErro] = useState(null)
+
+  const guardar = async () => {
+    try {
+      setGuardando(true)
+      setErro(null)
+      await obrasAPI.atualizar(obra.id, {
+        latitude: form.latitude ? parseFloat(form.latitude) : null,
+        longitude: form.longitude ? parseFloat(form.longitude) : null,
+        raio_metros: RAIO_MAXIMO,
+      })
+      onGuardada()
+      onFechar()
+    } catch { setErro('Erro ao guardar a localização.') }
+    finally { setGuardando(false) }
+  }
+
+  return (
+    <Modal titulo="Localização da obra" onFechar={onFechar} onGuardar={guardar} guardando={guardando}>
+      {erro && (
+        <div className="flex items-center gap-2 p-3 rounded-xl mb-4 text-sm"
+          style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
+          <AlertCircle size={14} /> {erro}
+        </div>
+      )}
+      <CamposLocalizacao form={form} setForm={setForm} />
     </Modal>
   )
 }
@@ -166,7 +264,7 @@ function ModalNovoFuncionario({ onFechar, onCriado }) {
         style={{ background: 'rgba(0,0,0,0.8)' }}>
         <div className="w-full max-w-sm rounded-3xl p-8 flex flex-col items-center gap-4"
           style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: '#16352A' }}>
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'var(--color-success-bg)' }}>
             <Send size={28} color="var(--color-success)" />
           </div>
           <h2 className="text-lg font-bold text-center">Funcionário criado!</h2>
@@ -186,7 +284,7 @@ function ModalNovoFuncionario({ onFechar, onCriado }) {
     <Modal titulo="Novo funcionário" onFechar={onFechar} onGuardar={guardar} guardando={guardando}>
       {erro && (
         <div className="flex items-center gap-2 p-3 rounded-xl mb-4 text-sm"
-          style={{ background: '#2A1A1A', color: 'var(--color-danger)' }}>
+          style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
           <AlertCircle size={14} /> {erro}
         </div>
       )}
@@ -250,7 +348,7 @@ function ModalAssociarFuncionario({ obraId, funcionariosNaObra, onFechar, onAsso
         </div>
         {erro && (
           <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-sm"
-            style={{ background: '#2A1A1A', color: 'var(--color-danger)' }}>
+            style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
             <AlertCircle size={14} /> {erro}
           </div>
         )}
@@ -291,7 +389,7 @@ function ModalAssociarFuncionario({ obraId, funcionariosNaObra, onFechar, onAsso
   )
 }
 
-function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
+function PerfilFuncionario({ funcionario, registosHoje, onVoltar, onApagar }) {
   const inputRef = useRef(null)
   const [dados, setDados] = useState({ ...funcionario })
   const [editando, setEditando] = useState(false)
@@ -303,6 +401,17 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
   const [erro, setErro] = useState(null)
   const [horasMes, setHorasMes] = useState(null)
   const [loadingHoras, setLoadingHoras] = useState(true)
+  const [confirmarApagar, setConfirmarApagar] = useState(false)
+  const [apagando, setApagando] = useState(false)
+
+  const apagarFuncionario = async () => {
+    try {
+      setApagando(true)
+      setErro(null)
+      await funcionariosAPI.apagar(funcionario.id)
+      onApagar()
+    } catch { setErro('Erro ao apagar o funcionário.'); setApagando(false) }
+  }
 
   const estado = calcularEstado(funcionario.id, registosHoje)
   const horasHoje = calcularHorasHoje(funcionario.id, registosHoje)
@@ -418,7 +527,7 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
         ) : (
           <div className="flex gap-2">
             <button onClick={() => setEditando(false)} className="w-9 h-9 rounded-xl flex items-center justify-center"
-              style={{ background: '#2A1A1A' }}>
+              style={{ background: 'var(--color-danger-bg)' }}>
               <X size={16} color="var(--color-danger)" />
             </button>
             <button onClick={guardarEdicao} disabled={guardandoAPI}
@@ -430,12 +539,12 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
         )}
       </div>
 
-      {erro && <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-sm" style={{ background: '#2A1A1A', color: 'var(--color-danger)' }}><AlertCircle size={14} /> {erro}</div>}
-      {guardado && <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-sm font-medium" style={{ background: '#16352A', color: 'var(--color-success)' }}><CheckCircle size={14} /> Informações atualizadas!</div>}
+      {erro && <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-sm" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}><AlertCircle size={14} /> {erro}</div>}
+      {guardado && <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-sm font-medium" style={{ background: 'var(--color-success-bg)', color: 'var(--color-success)' }}><CheckCircle size={14} /> Informações atualizadas!</div>}
 
       <div className="p-5 rounded-2xl mb-4"
         style={{ background: 'var(--color-surface)', border: `1px solid ${editando ? 'var(--color-primary)' : 'var(--color-border)'}` }}>
-        {editando && <p className="text-xs mb-4 px-3 py-2 rounded-xl" style={{ background: '#1F1208', color: 'var(--color-primary)', border: '1px solid #F9731633' }}>✏️ Modo de edição ativo</p>}
+        {editando && <p className="text-xs mb-4 px-3 py-2 rounded-xl" style={{ background: 'var(--color-primary-bg)', color: 'var(--color-primary)', border: '1px solid var(--color-primary-border)' }}>✏️ Modo de edição ativo</p>}
         <div className="flex items-center gap-4 mb-4">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold flex-shrink-0"
             style={{ background: 'var(--color-surface-2)', color: 'var(--color-primary)' }}>
@@ -477,7 +586,7 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="p-4 rounded-2xl" style={{ background: '#16352A', border: editando ? '1px solid var(--color-primary)' : 'none' }}>
+        <div className="p-4 rounded-2xl" style={{ background: 'var(--color-success-bg)', border: editando ? '1px solid var(--color-primary)' : 'none' }}>
           <div className="flex items-center gap-2 mb-1">
             <Euro size={14} color="var(--color-success)" />
             <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Valor/hora</span>
@@ -508,7 +617,7 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Custo estimado hoje</p>
           <p className="text-2xl font-bold mt-0.5">{ganhouHoje}€</p>
         </div>
-        <div className="text-xs px-3 py-1.5 rounded-full" style={{ background: '#16352A', color: 'var(--color-success)' }}>
+        <div className="text-xs px-3 py-1.5 rounded-full" style={{ background: 'var(--color-success-bg)', color: 'var(--color-success)' }}>
           {parseFloat(dados.valor_hora).toFixed(2)}€/h × {horasHoje}h
         </div>
       </div>
@@ -530,7 +639,7 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
               <p className="text-lg font-bold">{horasMes.horas}h</p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>horas</p>
             </div>
-            <div className="text-center p-3 rounded-xl" style={{ background: '#16352A' }}>
+            <div className="text-center p-3 rounded-xl" style={{ background: 'var(--color-success-bg)' }}>
               <p className="text-lg font-bold" style={{ color: 'var(--color-success)' }}>{horasMes.ganho}€</p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>total</p>
             </div>
@@ -555,7 +664,7 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
                   href={`https://www.google.com/maps?q=${registo.latitude},${registo.longitude}`}
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium"
-                  style={{ background: '#1F1208', color: 'var(--color-primary)', border: '1px solid #F9731633' }}>
+                  style={{ background: 'var(--color-primary-bg)', color: 'var(--color-primary)', border: '1px solid var(--color-primary-border)' }}>
                   <MapPin size={11} /> Ver local
                 </a>
               )}
@@ -579,7 +688,7 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
         onDrop={e => { e.preventDefault(); setArrastando(false); adicionarRecibo(e.dataTransfer.files) }}
         onClick={() => inputRef.current.click()}
         className="flex flex-col items-center gap-2 py-6 rounded-2xl mb-4 cursor-pointer"
-        style={{ border: `2px dashed ${arrastando ? 'var(--color-primary)' : 'var(--color-border)'}`, background: arrastando ? '#1F1208' : 'var(--color-surface)' }}>
+        style={{ border: `2px dashed ${arrastando ? 'var(--color-primary)' : 'var(--color-border)'}`, background: arrastando ? 'var(--color-primary-bg)' : 'var(--color-surface)' }}>
         <Upload size={22} style={{ color: arrastando ? 'var(--color-primary)' : 'var(--color-text-muted)' }} />
         <p className="text-sm font-medium">{arrastando ? 'Larga aqui!' : 'Clica ou arrasta um PDF'}</p>
         <input ref={inputRef} type="file" accept=".pdf" className="hidden" onChange={e => adicionarRecibo(e.target.files)} />
@@ -592,7 +701,7 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
             <div key={r.id} className="rounded-2xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <div className="flex items-center justify-between px-4 py-3">
                 <div className="flex items-center gap-3 flex-1">
-                  <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#16352A' }}>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-success-bg)' }}>
                     <FileText size={14} color="var(--color-success)" />
                   </div>
                   <div>
@@ -601,22 +710,72 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  {r.url && <a href={r.url} download={r.nome} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#16352A' }}><Download size={14} color="var(--color-success)" /></a>}
-                  <button onClick={() => removerRecibo(r.id)} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#2A1A1A' }}><Trash2 size={14} color="var(--color-danger)" /></button>
+                  {r.url && <a href={r.url} download={r.nome} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--color-success-bg)' }}><Download size={14} color="var(--color-success)" /></a>}
+                  <button onClick={() => removerRecibo(r.id)} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--color-danger-bg)' }}><Trash2 size={14} color="var(--color-danger)" /></button>
                 </div>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* Zona de perigo — apagar funcionário */}
+      <div className="p-4 rounded-2xl mt-2 mb-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-danger-border)' }}>
+        <p className="text-sm font-bold mb-1" style={{ color: 'var(--color-danger)' }}>Apagar funcionário</p>
+        <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)' }}>
+          Remove permanentemente {dados.nome}, os seus registos de ponto e recibos. Esta ação não pode ser desfeita.
+        </p>
+        <button onClick={() => setConfirmarApagar(true)}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium"
+          style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
+          <Trash2 size={14} /> Apagar funcionário
+        </button>
+      </div>
+
+      {confirmarApagar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.8)' }}
+          onClick={() => setConfirmarApagar(false)}>
+          <div className="w-full max-w-sm rounded-3xl p-6" onClick={e => e.stopPropagation()}
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'var(--color-danger-bg)' }}>
+              <Trash2 size={26} color="var(--color-danger)" />
+            </div>
+            <h2 className="text-lg font-bold mb-2">Apagar {dados.nome}?</h2>
+            <p className="text-sm mb-6" style={{ color: 'var(--color-text-muted)' }}>
+              Vais apagar permanentemente este funcionário e todos os seus dados (pontos, recibos e acesso). Esta ação é irreversível.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmarApagar(false)} className="flex-1 py-3 rounded-xl font-medium text-sm"
+                style={{ background: 'var(--color-surface-2)' }}>Cancelar</button>
+              <button onClick={apagarFuncionario} disabled={apagando}
+                className="flex-1 py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
+                style={{ background: 'var(--color-danger)', color: 'white' }}>
+                {apagando ? 'A apagar...' : 'Apagar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, onRecarregar }) {
+function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, onRecarregar, onArquivar }) {
   const [modalAssociar, setModalAssociar] = useState(false)
+  const [modalLocalizacao, setModalLocalizacao] = useState(false)
+  const [confirmarArquivar, setConfirmarArquivar] = useState(false)
+  const [arquivando, setArquivando] = useState(false)
   const [removendo, setRemovendo] = useState(null)
   const [erro, setErro] = useState(null)
+
+  const arquivar = async () => {
+    try {
+      setArquivando(true)
+      setErro(null)
+      await obrasAPI.apagar(obra.id)
+      onArquivar()
+    } catch { setErro('Erro ao arquivar a obra.'); setArquivando(false) }
+  }
 
   const presentes = funcionarios.filter(f => calcularEstado(f.id, registosHoje) === 'presente').length
   const ausentes  = funcionarios.filter(f => calcularEstado(f.id, registosHoje) === 'ausente').length
@@ -634,6 +793,7 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
   return (
     <div className="min-h-screen p-4 w-full max-w-lg mx-auto flex flex-col" style={{ paddingTop: '20px' }}>
       {modalAssociar && <ModalAssociarFuncionario obraId={obra.id} funcionariosNaObra={funcionarios} onFechar={() => setModalAssociar(false)} onAssociado={onRecarregar} />}
+      {modalLocalizacao && <ModalLocalizacaoObra obra={obra} onFechar={() => setModalLocalizacao(false)} onGuardada={onRecarregar} />}
       <div className="flex items-center gap-3 py-4 mb-4">
         <button onClick={onVoltar} className="w-9 h-9 rounded-xl flex items-center justify-center"
           style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -641,7 +801,12 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
         </button>
         <div className="flex-1">
           <h1 className="text-lg font-bold">{obra.nome}</h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{obra.local}</p>
+          <p className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+            {obra.local}
+            {obra.latitude
+              ? <span className="flex items-center gap-0.5" style={{ color: 'var(--color-success)' }}>· <MapPin size={10} /> GPS</span>
+              : <span style={{ color: 'var(--color-danger)' }}>· sem GPS</span>}
+          </p>
         </div>
         <button onClick={() => setModalAssociar(true)}
           className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium"
@@ -649,12 +814,52 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
           <UserPlus size={14} /> Adicionar
         </button>
       </div>
-      {erro && <div className="flex items-center gap-2 p-3 rounded-xl mb-4 text-sm" style={{ background: '#2A1A1A', color: 'var(--color-danger)' }}><AlertCircle size={14} /> {erro}</div>}
+
+      {/* Ações da obra */}
+      <div className="flex items-center gap-2 mb-4">
+        <button onClick={() => setModalLocalizacao(true)}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium flex-1 justify-center"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <MapPin size={13} color="var(--color-primary)" /> {obra.latitude ? 'Editar localização' : 'Definir localização'}
+        </button>
+        <button onClick={() => setConfirmarArquivar(true)}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium"
+          style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
+          <Archive size={13} /> Arquivar obra
+        </button>
+      </div>
+
+      {confirmarArquivar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.8)' }}
+          onClick={() => setConfirmarArquivar(false)}>
+          <div className="w-full max-w-sm rounded-3xl p-6" onClick={e => e.stopPropagation()}
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'var(--color-danger-bg)' }}>
+              <Archive size={26} color="var(--color-danger)" />
+            </div>
+            <h2 className="text-lg font-bold mb-2">Arquivar "{obra.nome}"?</h2>
+            <p className="text-sm mb-6" style={{ color: 'var(--color-text-muted)' }}>
+              A obra deixa de aparecer na lista, mas o histórico de pontos é mantido. Podes reativá-la mais tarde na base de dados.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmarArquivar(false)} className="flex-1 py-3 rounded-xl font-medium text-sm"
+                style={{ background: 'var(--color-surface-2)' }}>Cancelar</button>
+              <button onClick={arquivar} disabled={arquivando}
+                className="flex-1 py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
+                style={{ background: 'var(--color-danger)', color: 'white' }}>
+                {arquivando ? 'A arquivar...' : 'Arquivar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {erro && <div className="flex items-center gap-2 p-3 rounded-xl mb-4 text-sm" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}><AlertCircle size={14} /> {erro}</div>}
       <div className="grid grid-cols-3 gap-3 mb-6">
         {[
-          { label: 'Em obra', value: presentes, bg: '#16352A', color: 'var(--color-success)' },
-          { label: 'Saíram', value: sairam, bg: '#1A1A2E', color: '#60A5FA' },
-          { label: 'Ausentes', value: ausentes, bg: '#2A1A1A', color: 'var(--color-danger)' },
+          { label: 'Em obra', value: presentes, bg: 'var(--color-success-bg)', color: 'var(--color-success)' },
+          { label: 'Saíram', value: sairam, bg: 'var(--color-info-bg)', color: 'var(--color-info)' },
+          { label: 'Ausentes', value: ausentes, bg: 'var(--color-danger-bg)', color: 'var(--color-danger)' },
         ].map(s => (
           <div key={s.label} className="p-4 rounded-2xl text-center" style={{ background: s.bg }}>
             <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</p>
@@ -692,7 +897,7 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
               <BadgeEstado estado={calcularEstado(f.id, registosHoje)} />
               <button onClick={() => remover(f.id)} disabled={removendo === f.id}
                 className="w-8 h-8 rounded-xl flex items-center justify-center disabled:opacity-30"
-                style={{ background: '#2A1A1A' }}>
+                style={{ background: 'var(--color-danger-bg)' }}>
                 <UserMinus size={14} color="var(--color-danger)" />
               </button>
               <button onClick={() => onVerPerfil(f)} className="w-8 h-8 rounded-xl flex items-center justify-center"
@@ -709,9 +914,12 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
 
 export default function DashboardAdmin() {
   const [vista, setVista] = useState('obras')
+  const [aba, setAba] = useState('obras')
+  const [origemPerfil, setOrigemPerfil] = useState('detalhe')
   const [obraAtiva, setObraAtiva] = useState(null)
   const [funcionarioAtivo, setFuncionarioAtivo] = useState(null)
   const [obras, setObras] = useState([])
+  const [funcionariosTodos, setFuncionariosTodos] = useState([])
   const [registosHoje, setRegistosHoje] = useState([])
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState(null)
@@ -730,8 +938,14 @@ export default function DashboardAdmin() {
     try {
       if (!silencioso) setLoading(true)
       setErro(null)
-      const obrasData = await obrasAPI.listar()
+      const [obrasData, funcionariosData] = await Promise.all([
+        obrasAPI.listar(),
+        funcionariosAPI.listar(),
+      ])
       setObras(obrasData)
+      setFuncionariosTodos(funcionariosData)
+      // Mantém a obra aberta sincronizada com os dados frescos (funcionários, localização...)
+      setObraAtiva(prev => prev ? obrasData.find(o => o.id === prev.id) || null : null)
       const todosRegistos = []
       for (const obra of obrasData) {
         try { const registos = await pontoAPI.obraHoje(obra.id); todosRegistos.push(...registos) } catch {}
@@ -743,22 +957,28 @@ export default function DashboardAdmin() {
 
   const getFuncionariosObra = (obra) => (obra.obra_funcionarios || []).map(of => of.funcionarios).filter(Boolean)
 
+  const voltarDoPerfil = origemPerfil === 'detalhe' ? 'detalhe' : 'obras'
+
   if (vista === 'perfil' && funcionarioAtivo) {
-    return <PerfilFuncionario funcionario={funcionarioAtivo} registosHoje={registosHoje} onVoltar={() => setVista('detalhe')} />
+    return <PerfilFuncionario funcionario={funcionarioAtivo} registosHoje={registosHoje}
+      onVoltar={() => setVista(voltarDoPerfil)}
+      onApagar={() => { setFuncionarioAtivo(null); setVista(voltarDoPerfil); carregarDados() }} />
   }
 
   if (vista === 'detalhe' && obraAtiva) {
     return (
       <DetalheObra
         obra={obraAtiva} funcionarios={getFuncionariosObra(obraAtiva)} registosHoje={registosHoje}
-        onVoltar={() => setVista('obras')} onVerPerfil={f => { setFuncionarioAtivo(f); setVista('perfil') }}
+        onVoltar={() => setVista('obras')}
+        onVerPerfil={f => { setOrigemPerfil('detalhe'); setFuncionarioAtivo(f); setVista('perfil') }}
         onRecarregar={carregarDados}
+        onArquivar={() => { setObraAtiva(null); setVista('obras'); carregarDados() }}
       />
     )
   }
 
-  const todosFuncionarios = obras.flatMap(getFuncionariosObra)
-  const totalPresentes = todosFuncionarios.filter(f => calcularEstado(f.id, registosHoje) === 'presente').length
+  const abrirPerfil = (f) => { setOrigemPerfil('lista'); setFuncionarioAtivo(f); setVista('perfil') }
+  const totalPresentes = funcionariosTodos.filter(f => calcularEstado(f.id, registosHoje) === 'presente').length
 
   return (
     <div className="min-h-screen p-4 w-full max-w-lg mx-auto flex flex-col justify-center gap-5"
@@ -778,7 +998,7 @@ export default function DashboardAdmin() {
           style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>Sair</button>
       </div>
 
-      {erro && <div className="flex items-center gap-2 p-3 rounded-xl text-sm" style={{ background: '#2A1A1A', color: 'var(--color-danger)' }}><AlertCircle size={14} /> {erro}</div>}
+      {erro && <div className="flex items-center gap-2 p-3 rounded-xl text-sm" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}><AlertCircle size={14} /> {erro}</div>}
 
       {loading ? (
         <p className="text-center py-12" style={{ color: 'var(--color-text-muted)' }}>A carregar dados...</p>
@@ -789,10 +1009,10 @@ export default function DashboardAdmin() {
             <div>
               <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Total em obra agora</p>
               <p className="text-3xl font-bold mt-1">{totalPresentes}
-                <span className="text-base font-normal ml-1" style={{ color: 'var(--color-text-muted)' }}>/ {todosFuncionarios.length} funcionários</span>
+                <span className="text-base font-normal ml-1" style={{ color: 'var(--color-text-muted)' }}>/ {funcionariosTodos.length} funcionários</span>
               </p>
             </div>
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: '#16352A' }}>
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'var(--color-success-bg)' }}>
               <Users size={22} color="var(--color-success)" />
             </div>
           </div>
@@ -810,9 +1030,26 @@ export default function DashboardAdmin() {
             </button>
           </div>
 
-          <h2 className="text-base font-bold flex items-center gap-2"><Building2 size={16} /> Obras ativas</h2>
+          {/* Seletor de abas */}
+          <div className="flex gap-1 p-1 rounded-2xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            {[
+              { id: 'obras', label: 'Obras', icon: <Building2 size={15} />, count: obras.length },
+              { id: 'funcionarios', label: 'Funcionários', icon: <Users size={15} />, count: funcionariosTodos.length },
+            ].map(t => (
+              <button key={t.id} onClick={() => setAba(t.id)}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                style={aba === t.id
+                  ? { background: 'var(--color-primary)', color: 'white' }
+                  : { background: 'transparent', color: 'var(--color-text-muted)' }}>
+                {t.icon} {t.label}
+                <span className="text-xs px-1.5 py-0.5 rounded-full"
+                  style={{ background: aba === t.id ? 'rgba(255,255,255,0.2)' : 'var(--color-surface-2)' }}>{t.count}</span>
+              </button>
+            ))}
+          </div>
 
-          {obras.length === 0 ? (
+          {aba === 'obras' ? (
+            obras.length === 0 ? (
             <div className="flex flex-col items-center py-12 rounded-2xl gap-3"
               style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <Building2 size={32} style={{ color: 'var(--color-text-muted)' }} />
@@ -845,14 +1082,53 @@ export default function DashboardAdmin() {
                       <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-xs px-2 py-1 rounded-full" style={{ background: '#16352A', color: 'var(--color-success)' }}>{presentes} presentes</span>
-                      <span className="text-xs px-2 py-1 rounded-full" style={{ background: '#2A1A1A', color: 'var(--color-danger)' }}>{ausentes} ausentes</span>
+                      <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--color-success-bg)', color: 'var(--color-success)' }}>{presentes} presentes</span>
+                      <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>{ausentes} ausentes</span>
                       <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{funcionarios.length} total</span>
                     </div>
                   </button>
                 )
               })}
             </div>
+          )
+          ) : (
+            /* ── Aba: lista de todos os funcionários ── */
+            funcionariosTodos.length === 0 ? (
+              <div className="flex flex-col items-center py-12 rounded-2xl gap-3"
+                style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <Users size={32} style={{ color: 'var(--color-text-muted)' }} />
+                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Nenhum funcionário registado</p>
+                <button onClick={() => setModalFuncionario(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+                  style={{ background: 'var(--color-primary)', color: 'white' }}>
+                  <UserPlus size={14} /> Criar primeiro funcionário
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {funcionariosTodos.map(f => (
+                  <button key={f.id} onClick={() => abrirPerfil(f)}
+                    className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl text-left hover:opacity-80 transition-all"
+                    style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold flex-shrink-0"
+                        style={{ background: 'var(--color-surface-2)', color: 'var(--color-primary)' }}>
+                        {f.nome.charAt(0)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate">{f.nome}</p>
+                        <p className="text-xs truncate" style={{ color: 'var(--color-text-muted)' }}>
+                          {f.funcao || 'Sem função'} · {parseFloat(f.valor_hora || 0).toFixed(2)}€/h
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <BadgeEstado estado={calcularEstado(f.id, registosHoje)} />
+                      <ChevronRight size={16} style={{ color: 'var(--color-text-muted)' }} />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )
           )}
         </>
       )}

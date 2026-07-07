@@ -60,6 +60,9 @@ export const obrasAPI = {
       method: 'PUT',
       body: JSON.stringify(dados),
     }),
+
+  apagar: (id) =>
+    request(`/obras/${id}`, { method: 'DELETE' }),
 }
 
 // ── PONTO ─────────────────────────────────────────────────────────────────────

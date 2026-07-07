@@ -59,12 +59,20 @@ router.put('/:id', async (req, res) => {
   res.json(data)
 })
 
-// DELETE /api/funcionarios/:id — apagar funcionário
+// DELETE /api/funcionarios/:id — apagar funcionário e todos os dados associados
 router.delete('/:id', async (req, res) => {
+  const id = req.params.id
+
+  // Remover primeiro as referências para não violar chaves estrangeiras
+  await supabase.from('obra_funcionarios').delete().eq('funcionario_id', id)
+  await supabase.from('registos_ponto').delete().eq('funcionario_id', id)
+  await supabase.from('recibos').delete().eq('funcionario_id', id)
+  await supabase.from('perfis').delete().eq('funcionario_id', id)
+
   const { error } = await supabase
     .from('funcionarios')
     .delete()
-    .eq('id', req.params.id)
+    .eq('id', id)
 
   if (error) return res.status(500).json({ error: error.message })
   res.json({ message: 'Funcionário apagado com sucesso' })
