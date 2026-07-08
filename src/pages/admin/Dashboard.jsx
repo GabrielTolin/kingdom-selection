@@ -391,8 +391,9 @@ function ModalAssociarFuncionario({ obraId, funcionariosNaObra, onFechar, onAsso
   )
 }
 
-function PerfilFuncionario({ funcionario, registosHoje, onVoltar, onApagar }) {
+function PerfilFuncionario({ funcionario, registosHoje, onVoltar, onApagar, onRecarregar }) {
   const inputRef = useRef(null)
+  const [modalMarcacoes, setModalMarcacoes] = useState(false)
   const [dados, setDados] = useState({ ...funcionario })
   const [editando, setEditando] = useState(false)
   const [rascunho, setRascunho] = useState({ ...funcionario })
@@ -651,7 +652,19 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar, onApagar }) {
         )}
       </div>
 
-      <h3 className="text-sm font-bold mb-2 flex items-center gap-2"><Clock size={14} /> Ponto de hoje</h3>
+      {modalMarcacoes && (
+        <ModalMarcacoes funcionario={funcionario} onFechar={() => setModalMarcacoes(false)}
+          onAlterado={() => { carregarHorasMes(); onRecarregar?.() }} />
+      )}
+
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-bold flex items-center gap-2"><Clock size={14} /> Ponto de hoje</h3>
+        <button onClick={() => setModalMarcacoes(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <Pencil size={12} color="var(--color-primary)" /> Gerir marcações
+        </button>
+      </div>
       <div className="flex flex-col gap-2 mb-4">
         {[{ tipo: 'entrada', registo: entrada }, { tipo: 'saida', registo: saida }].map(({ tipo, registo }) => (
           <div key={tipo} className="flex items-center justify-between px-4 py-3 rounded-xl"
@@ -914,6 +927,193 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
   )
 }
 
+// "2026-07-08T10:07:48" (naive UTC) -> "11:07" (Lisboa), para preencher inputs de hora
+function horaParaHHMM(horaStr) {
+  const d = new Date(horaStr.endsWith('Z') || horaStr.includes('+') ? horaStr : horaStr + 'Z')
+  return d.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon' })
+}
+// data "YYYY-MM-DD" + "HH:MM" (Lisboa) -> "2026-07-08T10:07:00" (naive UTC, mesma convenção da app)
+function hhmmParaHora(data, hhmm) {
+  return new Date(`${data}T${hhmm}`).toISOString().slice(0, 19)
+}
+
+// Uma linha editável/apagável de marcação
+function LinhaMarcacao({ registo, data, onGuardar, onApagar, ocupado }) {
+  const [editando, setEditando] = useState(false)
+  const [hora, setHora] = useState(horaParaHHMM(registo.hora))
+  const [tipo, setTipo] = useState(registo.tipo)
+  const [confirmar, setConfirmar] = useState(false)
+  const isEntrada = registo.tipo === 'entrada'
+
+  const guardar = async () => {
+    await onGuardar(registo.id, { tipo, hora: hhmmParaHora(data, hora) })
+    setEditando(false)
+  }
+
+  return (
+    <div className="px-4 py-3 rounded-xl" style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+      {!editando ? (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full" style={{ background: isEntrada ? 'var(--color-success)' : 'var(--color-danger)' }} />
+            <span className="text-sm capitalize font-medium">{registo.tipo}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">{horaParaHHMM(registo.hora)}</span>
+            <button onClick={() => { setHora(horaParaHHMM(registo.hora)); setTipo(registo.tipo); setEditando(true) }}
+              className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--color-surface)' }}>
+              <Pencil size={13} />
+            </button>
+            <button onClick={() => setConfirmar(true)}
+              className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--color-danger-bg)' }}>
+              <Trash2 size={13} color="var(--color-danger)" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <select value={tipo} onChange={e => setTipo(e.target.value)}
+            className="px-2 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+            <option value="entrada">Entrada</option>
+            <option value="saida">Saída</option>
+          </select>
+          <input type="time" value={hora} onChange={e => setHora(e.target.value)}
+            className="px-2 py-2 rounded-lg text-sm outline-none flex-1" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+          <button onClick={guardar} disabled={ocupado} className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 disabled:opacity-50" style={{ background: 'var(--color-primary)' }}>
+            <Save size={14} color="white" />
+          </button>
+          <button onClick={() => setEditando(false)} className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-surface)' }}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
+      {confirmar && (
+        <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <span className="text-xs" style={{ color: 'var(--color-danger)' }}>Apagar esta marcação?</span>
+          <div className="flex gap-2">
+            <button onClick={() => setConfirmar(false)} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'var(--color-surface)' }}>Não</button>
+            <button onClick={async () => { await onApagar(registo.id); setConfirmar(false) }} disabled={ocupado}
+              className="text-xs px-2 py-1 rounded-lg font-medium disabled:opacity-50" style={{ background: 'var(--color-danger)', color: 'white' }}>Sim, apagar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Modal de gestão de marcações de um funcionário (inserir / editar / apagar), por dia
+function ModalMarcacoes({ funcionario, onFechar, onAlterado }) {
+  const hoje = new Date().toISOString().slice(0, 10)
+  const [data, setData] = useState(hoje)
+  const [registos, setRegistos] = useState([])
+  const [obras, setObras] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [erro, setErro] = useState(null)
+  const [ocupado, setOcupado] = useState(false)
+  const [addAberto, setAddAberto] = useState(false)
+  const [novo, setNovo] = useState({ tipo: 'entrada', hora: '', obra_id: '' })
+
+  useEffect(() => { carregar() }, [data])
+  useEffect(() => { obrasAPI.listar().then(setObras).catch(() => {}) }, [])
+
+  const carregar = async () => {
+    try { setLoading(true); setErro(null); setRegistos(await pontoAPI.porData(funcionario.id, data)) }
+    catch { setErro('Erro ao carregar marcações.') }
+    finally { setLoading(false) }
+  }
+
+  const guardarEdicao = async (id, campos) => {
+    try { setOcupado(true); setErro(null); await pontoAPI.atualizar(id, campos); await carregar(); onAlterado?.() }
+    catch { setErro('Erro ao guardar a alteração.') }
+    finally { setOcupado(false) }
+  }
+
+  const apagar = async (id) => {
+    try { setOcupado(true); setErro(null); await pontoAPI.apagar(id); await carregar(); onAlterado?.() }
+    catch { setErro('Erro ao apagar.') }
+    finally { setOcupado(false) }
+  }
+
+  const adicionar = async () => {
+    if (!novo.hora) return setErro('Indica a hora da marcação')
+    try {
+      setOcupado(true); setErro(null)
+      await pontoAPI.criarManual({
+        funcionario_id: funcionario.id,
+        obra_id: novo.obra_id || null,
+        tipo: novo.tipo,
+        hora: hhmmParaHora(data, novo.hora),
+      })
+      setNovo({ tipo: 'entrada', hora: '', obra_id: '' })
+      setAddAberto(false)
+      await carregar(); onAlterado?.()
+    } catch { setErro('Erro ao adicionar marcação.') }
+    finally { setOcupado(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onFechar}>
+      <div className="w-full max-w-md rounded-3xl p-6 max-h-[90vh] overflow-y-auto"
+        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-bold flex items-center gap-2"><Clock size={18} /> Marcações</h2>
+          <button onClick={onFechar} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--color-surface-2)' }}><X size={16} /></button>
+        </div>
+        <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>{funcionario.nome}</p>
+
+        <div className="flex items-center gap-2 mb-4">
+          <Calendar size={15} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+          <input type="date" value={data} max={hoje} onChange={e => setData(e.target.value)}
+            className="flex-1 px-3 py-2 rounded-xl text-sm outline-none" style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+        </div>
+
+        {erro && <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-sm" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}><AlertCircle size={14} /> {erro}</div>}
+
+        {loading ? (
+          <p className="text-sm text-center py-6" style={{ color: 'var(--color-text-muted)' }}>A carregar...</p>
+        ) : registos.length === 0 ? (
+          <p className="text-sm text-center py-6 rounded-xl" style={{ color: 'var(--color-text-muted)', background: 'var(--color-surface-2)' }}>Sem marcações neste dia</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {registos.map(r => (
+              <LinhaMarcacao key={r.id} registo={r} data={data} onGuardar={guardarEdicao} onApagar={apagar} ocupado={ocupado} />
+            ))}
+          </div>
+        )}
+
+        {addAberto ? (
+          <div className="mt-4 p-3 rounded-xl" style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-primary)' }}>
+            <p className="text-xs font-medium mb-3" style={{ color: 'var(--color-primary)' }}>Nova marcação manual</p>
+            <div className="flex items-center gap-2 mb-2">
+              <select value={novo.tipo} onChange={e => setNovo(p => ({ ...p, tipo: e.target.value }))}
+                className="px-2 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+                <option value="entrada">Entrada</option>
+                <option value="saida">Saída</option>
+              </select>
+              <input type="time" value={novo.hora} onChange={e => setNovo(p => ({ ...p, hora: e.target.value }))}
+                className="px-2 py-2 rounded-lg text-sm outline-none flex-1" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+            </div>
+            <select value={novo.obra_id} onChange={e => setNovo(p => ({ ...p, obra_id: e.target.value }))}
+              className="w-full px-2 py-2 rounded-lg text-sm outline-none mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+              <option value="">Sem obra</option>
+              {obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
+            </select>
+            <div className="flex gap-2">
+              <button onClick={() => { setAddAberto(false); setErro(null) }} className="flex-1 py-2 rounded-lg text-sm font-medium" style={{ background: 'var(--color-surface)' }}>Cancelar</button>
+              <button onClick={adicionar} disabled={ocupado} className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50" style={{ background: 'var(--color-primary)', color: 'white' }}>{ocupado ? '...' : 'Adicionar'}</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAddAberto(true)} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium mt-4"
+            style={{ background: 'var(--color-surface-2)', border: '1px dashed var(--color-border)' }}>
+            <Plus size={15} color="var(--color-primary)" /> Adicionar marcação manual
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Calcula o intervalo de um período de folha de ponto (dia 23 → dia 22).
 // offset 0 = último período FECHADO; +1 = período em curso; -1 = período anterior, etc.
 function periodoInfo(offset = 0, hoje = new Date()) {
@@ -1132,6 +1332,7 @@ export default function DashboardAdmin() {
   if (vista === 'perfil' && funcionarioAtivo) {
     return <PerfilFuncionario funcionario={funcionarioAtivo} registosHoje={registosHoje}
       onVoltar={() => setVista(voltarDoPerfil)}
+      onRecarregar={carregarDados}
       onApagar={() => { setFuncionarioAtivo(null); setVista(voltarDoPerfil); carregarDados() }} />
   }
 

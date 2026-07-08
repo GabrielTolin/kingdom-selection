@@ -83,8 +83,26 @@ export const pontoAPI = {
   hoje: (funcionario_id) =>
     request(`/ponto/${funcionario_id}/hoje`),
 
+  porData: (funcionario_id, data) =>
+    request(`/ponto/${funcionario_id}/data/${data}`),
+
   obraHoje: (obra_id) =>
     request(`/ponto/obra/${obra_id}/hoje`),
+
+  criarManual: ({ funcionario_id, obra_id, tipo, hora }) =>
+    request('/ponto', {
+      method: 'POST',
+      body: JSON.stringify({ funcionario_id, obra_id, tipo, hora }),
+    }),
+
+  atualizar: (id, dados) =>
+    request(`/ponto/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(dados),
+    }),
+
+  apagar: (id) =>
+    request(`/ponto/${id}`, { method: 'DELETE' }),
 }
 
 // ── RECIBOS ───────────────────────────────────────────────────────────────────
