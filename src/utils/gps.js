@@ -81,9 +81,10 @@ export function distanciaAObra(localizacao, obra) {
   )
 }
 
-// Verificar se está dentro do raio permitido da obra (máximo 200 m por defeito)
+// Verificar se está dentro do raio permitido da obra (máximo 200 m por defeito).
+// Obra sem coordenadas não pode ser validada — devolve false (o ponto só é permitido na obra).
 export function estaDentroDoRaio(localizacao, obra) {
-  if (!obra?.latitude || !obra?.longitude) return true // sem GPS configurado, permite sempre
+  if (!obra?.latitude || !obra?.longitude) return false
   const distancia = distanciaAObra(localizacao, obra)
   return distancia <= (obra.raio_metros || RAIO_MAXIMO)
 }

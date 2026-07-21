@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, Clock, CheckCircle, XCircle, Building2, ChevronRight, ChevronLeft, ArrowLeft, Phone, Mail, Euro, Calendar, Briefcase, FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Pencil, Save, X, AlertCircle, Plus, UserPlus, UserMinus, BarChart2, Send, MapPin, Crosshair, Archive } from 'lucide-react'
+import { Users, Clock, CheckCircle, XCircle, Building2, ChevronRight, ChevronLeft, ArrowLeft, Phone, Mail, Euro, Calendar, Briefcase, FileText, Upload, Download, Trash2, ChevronDown, ChevronUp, Pencil, Save, X, AlertCircle, Plus, UserPlus, UserMinus, BarChart2, Send, MapPin, Crosshair, Archive, Search } from 'lucide-react'
 import { obrasAPI, funcionariosAPI, pontoAPI, recibosAPI, obraFuncionariosAPI } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../context/AuthContext'
@@ -23,8 +23,12 @@ function BadgeEstado({ estado }) {
   )
 }
 
-function calcularEstado(funcionarioId, registosHoje) {
-  const registos = registosHoje.filter(r => r.funcionario_id === funcionarioId)
+// Estado do funcionário. Se obraId for indicado, considera apenas os registos dessa obra
+// (um funcionário associado a várias obras só está "presente" naquela onde deu entrada).
+function calcularEstado(funcionarioId, registosHoje, obraId = null) {
+  const registos = registosHoje
+    .filter(r => r.funcionario_id === funcionarioId && (!obraId || r.obra_id === obraId))
+    .sort((a, b) => new Date(a.hora) - new Date(b.hora))
   if (registos.length === 0) return 'ausente'
   const ultimo = registos[registos.length - 1]
   return ultimo.tipo === 'entrada' ? 'presente' : 'saiu'
@@ -86,20 +90,52 @@ function CampoInput({ label, icon, ...props }) {
   )
 }
 
-// Campos de localização GPS reutilizados na criação e edição de obras
+// Campos de localização GPS reutilizados na criação e edição de obras.
+// Três formas de definir: procurar pela morada (Nominatim), GPS do dispositivo, ou coordenadas à mão.
 function CamposLocalizacao({ form, setForm }) {
   const [obtendo, setObtendo] = useState(false)
   const [erroGps, setErroGps] = useState(null)
   const [precisao, setPrecisao] = useState(null)
+  const [morada, setMorada] = useState(form.local || '')
+  const [procurando, setProcurando] = useState(false)
+  const [resultados, setResultados] = useState([])
+  const [erroBusca, setErroBusca] = useState(null)
 
   const usarAtual = async () => {
     try {
-      setObtendo(true); setErroGps(null); setPrecisao(null)
+      setObtendo(true); setErroGps(null); setPrecisao(null); setResultados([])
       const loc = await obterLocalizacao()
       setForm(p => ({ ...p, latitude: loc.latitude.toFixed(6), longitude: loc.longitude.toFixed(6) }))
       setPrecisao(Math.round(loc.precisao))
     } catch (e) { setErroGps(e.message) }
     finally { setObtendo(false) }
+  }
+
+  // Geocodificação de moradas com OpenStreetMap Nominatim (gratuito, sem chave)
+  const procurarMorada = async () => {
+    const q = morada.trim()
+    if (!q) return setErroBusca('Escreve uma morada para procurar')
+    try {
+      setProcurando(true); setErroBusca(null); setResultados([]); setPrecisao(null); setErroGps(null)
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`
+      const res = await fetch(url, { headers: { Accept: 'application/json' } })
+      if (!res.ok) throw new Error('resposta inválida')
+      const dados = await res.json()
+      if (!dados.length) setErroBusca('Nenhuma morada encontrada. Tenta ser mais específico (rua, nº, cidade).')
+      setResultados(dados)
+    } catch { setErroBusca('Erro ao procurar a morada. Verifica a ligação à internet.') }
+    finally { setProcurando(false) }
+  }
+
+  const escolherResultado = (r) => {
+    setForm(p => ({
+      ...p,
+      latitude: parseFloat(r.lat).toFixed(6),
+      longitude: parseFloat(r.lon).toFixed(6),
+      ...(p.local !== undefined && !p.local ? { local: r.display_name.split(',').slice(0, 3).join(',').trim() } : {}),
+    }))
+    setResultados([])
+    setErroBusca(null)
   }
 
   const temLocalizacao = form.latitude && form.longitude
@@ -113,13 +149,47 @@ function CamposLocalizacao({ form, setForm }) {
         <button type="button" onClick={usarAtual} disabled={obtendo}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50"
           style={{ background: 'var(--color-primary)', color: 'white' }}>
-          <Crosshair size={12} /> {obtendo ? 'A obter...' : 'Usar localização atual'}
+          <Crosshair size={12} /> {obtendo ? 'A obter...' : 'Localização atual'}
         </button>
       </div>
+
+      {/* Procurar pela morada */}
+      <div className="flex items-center gap-2 mb-2">
+        <input placeholder="Procurar morada (ex: Rua das Flores 12, Porto)"
+          value={morada} onChange={e => setMorada(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); procurarMorada() } }}
+          className="flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+        <button type="button" onClick={procurarMorada} disabled={procurando}
+          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 disabled:opacity-50"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <Search size={14} color="var(--color-primary)" />
+        </button>
+      </div>
+
+      {procurando && <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>A procurar morada...</p>}
+      {erroBusca && <p className="text-xs mb-2" style={{ color: 'var(--color-danger)' }}>{erroBusca}</p>}
+
+      {resultados.length > 0 && (
+        <div className="flex flex-col gap-1 mb-2 rounded-lg overflow-hidden" style={{ maxHeight: '160px', overflowY: 'auto' }}>
+          {resultados.map(r => (
+            <button type="button" key={r.place_id} onClick={() => escolherResultado(r)}
+              className="text-left px-3 py-2 rounded-lg text-xs transition-all hover:opacity-80"
+              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <span className="flex items-start gap-1.5">
+                <MapPin size={11} color="var(--color-primary)" style={{ flexShrink: 0, marginTop: 2 }} />
+                {r.display_name}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {erroGps && <p className="text-xs mb-2" style={{ color: 'var(--color-danger)' }}>{erroGps}</p>}
       {precisao !== null && !erroGps && (
         <p className="text-xs mb-2" style={{ color: 'var(--color-success)' }}>✓ Localização obtida (precisão ~{precisao}m)</p>
       )}
+
       <div className="grid grid-cols-2 gap-2">
         <input placeholder="Latitude" value={form.latitude || ''}
           onChange={e => setForm(p => ({ ...p, latitude: e.target.value }))}
@@ -130,10 +200,10 @@ function CamposLocalizacao({ form, setForm }) {
           className="w-full px-3 py-2 rounded-lg text-xs outline-none"
           style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
       </div>
-      <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="text-xs mt-2" style={{ color: temLocalizacao ? 'var(--color-success)' : 'var(--color-danger)' }}>
         {temLocalizacao
-          ? 'Só é possível bater o ponto a menos de 200m deste local.'
-          : 'Sem GPS definido, o ponto pode ser batido em qualquer lugar.'}
+          ? `✓ Só é possível bater o ponto a menos de ${RAIO_MAXIMO}m deste local.`
+          : '⚠ Sem GPS definido — o ponto pode ser batido em qualquer lugar.'}
       </p>
     </div>
   )
@@ -183,9 +253,11 @@ function ModalNovaObra({ onFechar, onCriada }) {
   )
 }
 
-// Modal para definir/atualizar a localização GPS de uma obra existente
-function ModalLocalizacaoObra({ obra, onFechar, onGuardada }) {
+// Modal para editar uma obra existente: nome, morada e localização GPS
+function ModalEditarObra({ obra, onFechar, onGuardada }) {
   const [form, setForm] = useState({
+    nome: obra.nome || '',
+    local: obra.local || '',
     latitude: obra.latitude || '',
     longitude: obra.longitude || '',
   })
@@ -193,29 +265,40 @@ function ModalLocalizacaoObra({ obra, onFechar, onGuardada }) {
   const [erro, setErro] = useState(null)
 
   const guardar = async () => {
+    if (!form.nome.trim()) return setErro('O nome da obra é obrigatório')
     try {
       setGuardando(true)
       setErro(null)
       await obrasAPI.atualizar(obra.id, {
+        nome: form.nome,
+        local: form.local,
         latitude: form.latitude ? parseFloat(form.latitude) : null,
         longitude: form.longitude ? parseFloat(form.longitude) : null,
         raio_metros: RAIO_MAXIMO,
       })
       onGuardada()
       onFechar()
-    } catch { setErro('Erro ao guardar a localização.') }
+    } catch { setErro('Erro ao guardar as alterações.') }
     finally { setGuardando(false) }
   }
 
   return (
-    <Modal titulo="Localização da obra" onFechar={onFechar} onGuardar={guardar} guardando={guardando}>
+    <Modal titulo="Editar obra" onFechar={onFechar} onGuardar={guardar} guardando={guardando}>
       {erro && (
         <div className="flex items-center gap-2 p-3 rounded-xl mb-4 text-sm"
           style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
           <AlertCircle size={14} /> {erro}
         </div>
       )}
-      <CamposLocalizacao form={form} setForm={setForm} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <CampoInput label="Nome da obra *" icon={<Building2 size={12} />}
+          placeholder="ex: Obra Rua das Flores 12"
+          value={form.nome} onChange={e => setForm(p => ({ ...p, nome: e.target.value }))} />
+        <CampoInput label="Morada / local" icon={<MapPin size={12} />}
+          placeholder="ex: Rua das Flores 12, Porto"
+          value={form.local} onChange={e => setForm(p => ({ ...p, local: e.target.value }))} />
+        <CamposLocalizacao form={form} setForm={setForm} />
+      </div>
     </Modal>
   )
 }
@@ -792,9 +875,9 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
     } catch { setErro('Erro ao arquivar a obra.'); setArquivando(false) }
   }
 
-  const presentes = funcionarios.filter(f => calcularEstado(f.id, registosHoje) === 'presente').length
-  const ausentes  = funcionarios.filter(f => calcularEstado(f.id, registosHoje) === 'ausente').length
-  const sairam    = funcionarios.filter(f => calcularEstado(f.id, registosHoje) === 'saiu').length
+  const presentes = funcionarios.filter(f => calcularEstado(f.id, registosHoje, obra.id) === 'presente').length
+  const ausentes  = funcionarios.filter(f => calcularEstado(f.id, registosHoje, obra.id) === 'ausente').length
+  const sairam    = funcionarios.filter(f => calcularEstado(f.id, registosHoje, obra.id) === 'saiu').length
 
   const remover = async (funcionarioId) => {
     try {
@@ -808,7 +891,7 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
   return (
     <div className="min-h-screen p-4 w-full max-w-lg mx-auto flex flex-col" style={{ paddingTop: '20px' }}>
       {modalAssociar && <ModalAssociarFuncionario obraId={obra.id} funcionariosNaObra={funcionarios} onFechar={() => setModalAssociar(false)} onAssociado={onRecarregar} />}
-      {modalLocalizacao && <ModalLocalizacaoObra obra={obra} onFechar={() => setModalLocalizacao(false)} onGuardada={onRecarregar} />}
+      {modalLocalizacao && <ModalEditarObra obra={obra} onFechar={() => setModalLocalizacao(false)} onGuardada={onRecarregar} />}
       <div className="flex items-center gap-3 py-4 mb-4">
         <button onClick={onVoltar} className="w-9 h-9 rounded-xl flex items-center justify-center"
           style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -835,7 +918,7 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
         <button onClick={() => setModalLocalizacao(true)}
           className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium flex-1 justify-center"
           style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          <MapPin size={13} color="var(--color-primary)" /> {obra.latitude ? 'Editar localização' : 'Definir localização'}
+          <Pencil size={13} color="var(--color-primary)" /> Editar obra
         </button>
         <button onClick={() => setConfirmarArquivar(true)}
           className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium"
@@ -909,7 +992,7 @@ function DetalheObra({ obra, funcionarios, registosHoje, onVoltar, onVerPerfil, 
               </div>
             </button>
             <div className="flex items-center gap-2">
-              <BadgeEstado estado={calcularEstado(f.id, registosHoje)} />
+              <BadgeEstado estado={calcularEstado(f.id, registosHoje, obra.id)} />
               <button onClick={() => remover(f.id)} disabled={removendo === f.id}
                 className="w-8 h-8 rounded-xl flex items-center justify-center disabled:opacity-30"
                 style={{ background: 'var(--color-danger-bg)' }}>
@@ -1437,8 +1520,8 @@ export default function DashboardAdmin() {
             <div className="flex flex-col gap-3">
               {obras.map(obra => {
                 const funcionarios = getFuncionariosObra(obra)
-                const presentes = funcionarios.filter(f => calcularEstado(f.id, registosHoje) === 'presente').length
-                const ausentes  = funcionarios.filter(f => calcularEstado(f.id, registosHoje) === 'ausente').length
+                const presentes = funcionarios.filter(f => calcularEstado(f.id, registosHoje, obra.id) === 'presente').length
+                const ausentes  = funcionarios.filter(f => calcularEstado(f.id, registosHoje, obra.id) === 'ausente').length
                 return (
                   <button key={obra.id} onClick={() => { setObraAtiva(obra); setVista('detalhe') }}
                     className="w-full text-left px-4 py-4 rounded-2xl hover:opacity-80"
@@ -1451,6 +1534,12 @@ export default function DashboardAdmin() {
                         <div>
                           <p className="font-semibold text-sm">{obra.nome}</p>
                           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{obra.local}</p>
+                          {!obra.latitude && (
+                            <span className="inline-flex items-center gap-1 text-xs mt-1 px-2 py-0.5 rounded-full"
+                              style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
+                              <AlertCircle size={10} /> sem GPS — ponto bloqueado
+                            </span>
+                          )}
                         </div>
                       </div>
                       <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />

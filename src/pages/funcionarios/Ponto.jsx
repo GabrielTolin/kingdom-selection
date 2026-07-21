@@ -18,6 +18,7 @@ export default function PontoFuncionario() {
   const [erro, setErro] = useState(null)
   const [erroGPS, setErroGPS] = useState(null)
   const [obraAtual, setObraAtual] = useState(null)
+  const [obrasDisponiveis, setObrasDisponiveis] = useState([])
   const [modalPassword, setModalPassword] = useState(false)
   const [distancia, setDistancia] = useState(null)
   const navigate = useNavigate()
@@ -43,6 +44,8 @@ export default function PontoFuncionario() {
 
   const raioObra = obraAtual?.raio_metros || RAIO_MAXIMO
   const dentroRaio = distancia !== null && distancia <= raioObra
+  // Com várias obras associadas, tem de escolher uma antes de dar entrada
+  const precisaEscolherObra = obrasDisponiveis.length > 1 && !obraAtual && !dentroObra
 
   const carregarTudo = async () => {
     try {
@@ -54,13 +57,27 @@ export default function PontoFuncionario() {
       ])
       setFuncionario(dadosFuncionario)
       setRegistos(registosHoje)
-      const ultimo = registosHoje[registosHoje.length - 1]
-      setDentroObra(ultimo?.tipo === 'entrada')
+
       const todasObras = await obrasAPI.listar()
-      const obraDoFuncionario = todasObras.find(o =>
+      const minhasObras = todasObras.filter(o =>
         o.obra_funcionarios?.some(of => of.funcionario_id === perfil.funcionario_id)
       )
-      setObraAtual(obraDoFuncionario || null)
+      setObrasDisponiveis(minhasObras)
+
+      const ultimo = registosHoje[registosHoje.length - 1]
+      const estaDentro = ultimo?.tipo === 'entrada'
+      setDentroObra(estaDentro)
+
+      if (estaDentro && ultimo.obra_id) {
+        // Já deu entrada: a obra fica fixa (a saída tem de ser registada na mesma obra)
+        setObraAtual(minhasObras.find(o => o.id === ultimo.obra_id) || null)
+      } else {
+        // Mantém a escolha anterior se ainda for válida; com uma só obra, seleciona-a
+        setObraAtual(prev => {
+          if (prev && minhasObras.some(o => o.id === prev.id)) return prev
+          return minhasObras.length === 1 ? minhasObras[0] : null
+        })
+      }
     } catch {
       setErro('Erro ao carregar dados. Verifica a ligação.')
     } finally {
@@ -69,6 +86,19 @@ export default function PontoFuncionario() {
   }
 
   const marcarPonto = async (tipo) => {
+    if (precisaEscolherObra) {
+      setErro('Seleciona a obra onde vais trabalhar antes de dar entrada.')
+      return
+    }
+    // Validação estrita: o ponto só pode ser batido dentro do raio de uma obra com GPS definido
+    if (!obraAtual) {
+      setErro('Não estás associado a nenhuma obra. Contacta o administrador.')
+      return
+    }
+    if (!obraAtual.latitude || !obraAtual.longitude) {
+      setErroGPS('Esta obra ainda não tem localização definida. Pede ao administrador para a configurar.')
+      return
+    }
     try {
       setRegistando(true)
       setErro(null)
@@ -77,22 +107,18 @@ export default function PontoFuncionario() {
       try {
         localizacaoAtual = await obterLocalizacao()
       } catch (gpsErr) {
-        if (obraAtual?.latitude) {
-          setErroGPS(`GPS: ${gpsErr.message}. Não é possível validar a localização.`)
-          setRegistando(false)
-          return
-        }
+        setErroGPS(`GPS: ${gpsErr.message}. Não é possível validar a localização.`)
+        setRegistando(false)
+        return
       }
-      if (localizacaoAtual && obraAtual?.latitude) {
-        if (!estaDentroDoRaio(localizacaoAtual, obraAtual)) {
-          const dist = Math.round(distanciaAObra(localizacaoAtual, obraAtual))
-          const raio = obraAtual.raio_metros || RAIO_MAXIMO
-          setErroGPS(`Estás a ${dist}m da obra — o limite para bater o ponto é ${raio}m. Aproxima-te do local de trabalho.`)
-          setRegistando(false)
-          return
-        }
+      if (!estaDentroDoRaio(localizacaoAtual, obraAtual)) {
+        const dist = Math.round(distanciaAObra(localizacaoAtual, obraAtual))
+        const raio = obraAtual.raio_metros || RAIO_MAXIMO
+        setErroGPS(`Estás a ${dist}m da obra — o limite para bater o ponto é ${raio}m. Aproxima-te do local de trabalho.`)
+        setRegistando(false)
+        return
       }
-      await pontoAPI.registar(perfil.funcionario_id, obraAtual?.id || null, tipo, localizacaoAtual)
+      await pontoAPI.registar(perfil.funcionario_id, obraAtual.id, tipo, localizacaoAtual)
       const atualizados = await pontoAPI.hoje(perfil.funcionario_id)
       setRegistos(atualizados)
       setDentroObra(atualizados[atualizados.length - 1]?.tipo === 'entrada')
@@ -106,6 +132,21 @@ export default function PontoFuncionario() {
   }
 
   const primeiroNome = funcionario?.nome?.split(' ')[0] || ''
+
+  const badgeDistancia = !obraAtual?.latitude ? null : distancia === null ? (
+    <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+      <Loader size={11} className="animate-spin" /> A localizar...
+    </span>
+  ) : (
+    <span className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+      style={{
+        background: dentroRaio ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+        color: dentroRaio ? 'var(--color-success)' : 'var(--color-danger)',
+      }}>
+      {dentroRaio ? <CheckCircle size={11} /> : <AlertCircle size={11} />}
+      ≈{Math.round(distancia)}m
+    </span>
+  )
 
   return (
         <div className="min-h-screen p-4 w-full max-w-sm mx-auto flex flex-col justify-start gap-6"
@@ -165,28 +206,47 @@ export default function PontoFuncionario() {
         </div>
       )}
 
-      {/* Obra atual + distância em tempo real */}
-      {obraAtual && (
+      {/* Seleção de obra — só quando está associado a mais do que uma e ainda não deu entrada */}
+      {obrasDisponiveis.length > 1 && !dentroObra && (
+        <div className="mb-4">
+          <p className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
+            Em que obra vais trabalhar?
+          </p>
+          <div className="flex flex-col gap-2">
+            {obrasDisponiveis.map(o => {
+              const ativa = obraAtual?.id === o.id
+              return (
+                <button key={o.id} onClick={() => setObraAtual(o)}
+                  className="flex items-center gap-2 px-3 py-3 rounded-xl text-left transition-all active:scale-95"
+                  style={{
+                    background: ativa ? 'var(--color-primary-bg)' : 'var(--color-surface)',
+                    border: `1px solid ${ativa ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                  }}>
+                  <MapPin size={14} color={ativa ? 'var(--color-primary)' : 'var(--color-text-muted)'} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">{o.nome}</p>
+                    {o.local && <p className="text-xs truncate" style={{ color: 'var(--color-text-muted)' }}>{o.local}</p>}
+                  </div>
+                  {ativa
+                    ? <>{badgeDistancia}<CheckCircle size={16} color="var(--color-primary)" /></>
+                    : !o.latitude && <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>sem GPS</span>}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Obra em curso / obra única */}
+      {obraAtual && (obrasDisponiveis.length <= 1 || dentroObra) && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-4"
           style={{ background: 'var(--color-surface-2)' }}>
           <MapPin size={13} color="var(--color-primary)" />
           <span className="text-xs font-medium">{obraAtual.nome}</span>
-          {obraAtual.latitude && (
-            distancia === null ? (
-              <span className="flex items-center gap-1 text-xs ml-auto" style={{ color: 'var(--color-text-muted)' }}>
-                <Loader size={11} className="animate-spin" /> A localizar...
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-xs font-semibold ml-auto px-2 py-0.5 rounded-full"
-                style={{
-                  background: dentroRaio ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
-                  color: dentroRaio ? 'var(--color-success)' : 'var(--color-danger)',
-                }}>
-                {dentroRaio ? <CheckCircle size={11} /> : <AlertCircle size={11} />}
-                ≈{Math.round(distancia)}m
-              </span>
-            )
+          {dentroObra && obrasDisponiveis.length > 1 && (
+            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>· em curso</span>
           )}
+          <span className="ml-auto">{badgeDistancia}</span>
         </div>
       )}
 
@@ -217,7 +277,7 @@ export default function PontoFuncionario() {
 
       {/* Botões ponto */}
       <div className="grid grid-cols-2 gap-4 mb-4">
-        <button onClick={() => marcarPonto('entrada')} disabled={dentroObra || loading || registando}
+        <button onClick={() => marcarPonto('entrada')} disabled={dentroObra || loading || registando || precisaEscolherObra}
           className="flex flex-col items-center gap-3 p-6 rounded-2xl transition-all active:scale-95 disabled:opacity-30"
           style={{ background: 'var(--color-success-bg)', border: '1px solid var(--color-success-border)' }}>
           {registando ? <Loader size={28} color="var(--color-success)" /> : <LogIn size={28} color="var(--color-success)" />}
