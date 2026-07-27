@@ -477,6 +477,7 @@ function ModalAssociarFuncionario({ obraId, funcionariosNaObra, onFechar, onAsso
 function PerfilFuncionario({ funcionario, registosHoje, onVoltar, onApagar, onRecarregar }) {
   const inputRef = useRef(null)
   const [modalMarcacoes, setModalMarcacoes] = useState(false)
+  const [modalHistorico, setModalHistorico] = useState(false)
   const [dados, setDados] = useState({ ...funcionario })
   const [editando, setEditando] = useState(false)
   const [rascunho, setRascunho] = useState({ ...funcionario })
@@ -739,14 +740,24 @@ function PerfilFuncionario({ funcionario, registosHoje, onVoltar, onApagar, onRe
         <ModalMarcacoes funcionario={funcionario} onFechar={() => setModalMarcacoes(false)}
           onAlterado={() => { carregarHorasMes(); onRecarregar?.() }} />
       )}
+      {modalHistorico && (
+        <ModalHistorico funcionario={funcionario} onFechar={() => setModalHistorico(false)} />
+      )}
 
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-bold flex items-center gap-2"><Clock size={14} /> Ponto de hoje</h3>
-        <button onClick={() => setModalMarcacoes(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium"
-          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          <Pencil size={12} color="var(--color-primary)" /> Gerir marcações
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setModalHistorico(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium"
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <Calendar size={12} color="var(--color-primary)" /> Histórico
+          </button>
+          <button onClick={() => setModalMarcacoes(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium"
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <Pencil size={12} color="var(--color-primary)" /> Gerir
+          </button>
+        </div>
       </div>
       <div className="flex flex-col gap-2 mb-4">
         {[{ tipo: 'entrada', registo: entrada }, { tipo: 'saida', registo: saida }].map(({ tipo, registo }) => (
@@ -1361,6 +1372,168 @@ function RelatorioMensal({ funcionariosTodos }) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// Modal só-leitura com o histórico de registos de um funcionário, por período de folha (23→22)
+function ModalHistorico({ funcionario, onFechar }) {
+  const [offset, setOffset] = useState(1) // 1 = período em curso
+  const [registos, setRegistos] = useState([])
+  const [obraNome, setObraNome] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [erro, setErro] = useState(null)
+
+  const { inicio, fim } = periodoInfo(offset)
+  const emCurso = offset >= 1
+  const periodoLabel = `${fmtDia(inicio)} — ${fmtDia(fim)}`
+
+  useEffect(() => { carregar() }, [offset])
+
+  const carregar = async () => {
+    try {
+      setLoading(true); setErro(null)
+      const [{ data: regs, error }, { data: obrasAll }] = await Promise.all([
+        supabase.from('registos_ponto').select('*')
+          .eq('funcionario_id', funcionario.id)
+          .gte('hora', inicio.toISOString()).lte('hora', fim.toISOString()).order('hora'),
+        supabase.from('obras').select('id, nome'),
+      ])
+      if (error) throw error
+      setRegistos(regs || [])
+      setObraNome(Object.fromEntries((obrasAll || []).map(o => [o.id, o.nome])))
+    } catch { setErro('Erro ao carregar o histórico.') }
+    finally { setLoading(false) }
+  }
+
+  const chaveDia = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const diaDoRegisto = r => chaveDia(new Date(r.hora.endsWith('Z') || r.hora.includes('+') ? r.hora : r.hora + 'Z'))
+
+  // Agrupar registos por dia (Lisboa)
+  const porDia = {}
+  for (const r of registos) (porDia[diaDoRegisto(r)] ||= []).push(r)
+
+  // Lista de dias do período, do início até hoje (mais recente primeiro)
+  const dias = []
+  const cursor = new Date(inicio)
+  const limite = new Date(Math.min(fim.getTime(), Date.now()))
+  while (cursor <= limite) { dias.push(chaveDia(cursor)); cursor.setDate(cursor.getDate() + 1) }
+  dias.reverse()
+
+  const horasDoDia = regs => {
+    const s = [...regs].sort((a, b) => new Date(a.hora) - new Date(b.hora))
+    let ms = 0
+    for (let i = 0; i < s.length - 1; i += 2) {
+      if (s[i].tipo === 'entrada' && s[i + 1]?.tipo === 'saida') ms += new Date(s[i + 1].hora) - new Date(s[i].hora)
+    }
+    return ms / 1000 / 3600
+  }
+
+  const diasTrabalhados = dias.filter(d => porDia[d]?.length).length
+  const totalHoras = Object.values(porDia).reduce((s, regs) => s + horasDoDia(regs), 0)
+  const faltas = dias.filter(d => !porDia[d]?.length && ![0, 6].includes(new Date(d + 'T12:00:00').getDay())).length
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onFechar}>
+      <div className="w-full max-w-md rounded-3xl p-6 max-h-[90vh] overflow-y-auto"
+        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-bold flex items-center gap-2"><Calendar size={18} /> Histórico</h2>
+          <button onClick={onFechar} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--color-surface-2)' }}><X size={16} /></button>
+        </div>
+        <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>{funcionario.nome}</p>
+
+        {/* Navegação de período */}
+        <div className="flex items-center justify-between p-2 rounded-2xl mb-3" style={{ background: 'var(--color-surface-2)' }}>
+          <button onClick={() => setOffset(o => o - 1)} className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-surface)' }}>
+            <ChevronLeft size={16} />
+          </button>
+          <div className="text-center">
+            <p className="text-sm font-bold">{periodoLabel}</p>
+            <p className="text-xs" style={{ color: emCurso ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>{emCurso ? 'Em curso' : 'Período fechado'}</p>
+          </div>
+          <button onClick={() => setOffset(o => Math.min(o + 1, 1))} disabled={offset >= 1}
+            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 disabled:opacity-30" style={{ background: 'var(--color-surface)' }}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
+        {/* Resumo */}
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <div className="p-2 rounded-xl text-center" style={{ background: 'var(--color-surface-2)' }}>
+            <p className="text-base font-bold" style={{ color: 'var(--color-primary)' }}>{diasTrabalhados}</p>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>dias</p>
+          </div>
+          <div className="p-2 rounded-xl text-center" style={{ background: 'var(--color-surface-2)' }}>
+            <p className="text-base font-bold">{totalHoras.toFixed(1)}h</p>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>horas</p>
+          </div>
+          <div className="p-2 rounded-xl text-center" style={{ background: faltas > 0 ? 'var(--color-danger-bg)' : 'var(--color-surface-2)' }}>
+            <p className="text-base font-bold" style={{ color: faltas > 0 ? 'var(--color-danger)' : 'var(--color-text)' }}>{faltas}</p>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>faltas</p>
+          </div>
+        </div>
+
+        {erro && <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-sm" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}><AlertCircle size={14} /> {erro}</div>}
+
+        {loading ? (
+          <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-muted)' }}>A carregar...</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {dias.map(dia => {
+              const regs = porDia[dia]
+              const dt = new Date(dia + 'T12:00:00')
+              const label = dt.toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'short' })
+              const fimDeSemana = [0, 6].includes(dt.getDay())
+
+              if (!regs?.length) {
+                return (
+                  <div key={dia} className="flex items-center justify-between px-4 py-2.5 rounded-xl"
+                    style={{ background: 'var(--color-surface-2)', opacity: fimDeSemana ? 0.5 : 1 }}>
+                    <span className="text-xs font-medium capitalize" style={{ color: 'var(--color-text-muted)' }}>{label}</span>
+                    <span className="text-xs font-medium" style={{ color: fimDeSemana ? 'var(--color-text-muted)' : 'var(--color-danger)' }}>
+                      {fimDeSemana ? 'fim de semana' : 'Faltou'}
+                    </span>
+                  </div>
+                )
+              }
+
+              const ordenados = [...regs].sort((a, b) => new Date(a.hora) - new Date(b.hora))
+              const obras = [...new Set(regs.map(r => r.obra_id).filter(Boolean))].map(id => obraNome[id] || '—').join(', ') || '—'
+              return (
+                <div key={dia} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                  <div className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-xs font-bold capitalize">{label}</span>
+                    <span className="text-xs font-bold" style={{ color: 'var(--color-primary)' }}>{horasDoDia(regs).toFixed(1)}h</span>
+                  </div>
+                  <div className="px-4 pb-1 flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    <Building2 size={11} /> {obras}
+                  </div>
+                  <div className="flex flex-col gap-1 px-4 py-2">
+                    {ordenados.map(r => (
+                      <div key={r.id} className="flex items-center justify-between">
+                        <span className="flex items-center gap-2 text-xs capitalize">
+                          <span className="w-2 h-2 rounded-full" style={{ background: r.tipo === 'entrada' ? 'var(--color-success)' : 'var(--color-danger)' }} />
+                          {r.tipo}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          {r.latitude && r.longitude && (
+                            <a href={`https://www.google.com/maps?q=${r.latitude},${r.longitude}`} target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-primary)' }}>
+                              <MapPin size={10} /> local
+                            </a>
+                          )}
+                          <span className="text-xs font-semibold">{horaParaHHMM(r.hora)}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
